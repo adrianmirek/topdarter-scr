@@ -33,8 +33,14 @@ export async function scrapeTournamentsByKeyword(
   if (isProduction) {
     // Use @sparticuz/chromium for serverless environments
     const executablePath = await chromiumPkg.executablePath();
+    console.log("Executable path:", executablePath);
     browser = await chromium.launch({
-      args: chromiumPkg.args,
+      args: [
+        ...chromiumPkg.args,
+        "--disable-gpu",
+        "--single-process",
+        "--no-zygote",
+      ],
       executablePath,
       headless: true,
     });
@@ -303,8 +309,14 @@ export async function scrapeTournamentMatches(
   if (isProduction) {
     // Use @sparticuz/chromium for serverless environments
     const executablePath = await chromiumPkg.executablePath();
+    console.log("Executable path:", executablePath);
     browser = await chromium.launch({
-      args: chromiumPkg.args,
+      args: [
+        ...chromiumPkg.args,
+        "--disable-gpu",
+        "--single-process",
+        "--no-zygote",
+      ],
       executablePath,
       headless: true,
     });
@@ -424,8 +436,14 @@ export async function scrapeMatchPlayerResults(
   if (isProduction) {
     // Use @sparticuz/chromium for serverless environments
     const executablePath = await chromiumPkg.executablePath();
+    console.log("Executable path:", executablePath);
     browser = await chromium.launch({
-      args: chromiumPkg.args,
+      args: [
+        ...chromiumPkg.args,
+        "--disable-gpu",
+        "--single-process",
+        "--no-zygote",
+      ],
       executablePath,
       headless: true,
     });
