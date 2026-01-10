@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Credentials": "true",
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,OPTIONS,POST",
-  "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, X-API-Key",
+  "Access-Control-Allow-Headers": "X-Requested-With, Content-Type, topdarter-api-key",
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -23,8 +23,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   // Optional: API Key authentication
-  const apiKey = process.env.SCRAPER_API_KEY;
-  if (apiKey && req.headers["x-api-key"] !== apiKey) {
+  const apiKey = process.env.TOPDARTER_API_KEY;
+  console.log("[DEBUG] API Key set:", apiKey ? "Yes (length: " + apiKey.length + ")" : "No");
+  console.log("[DEBUG] topdarter-api-key header:", req.headers["topdarter-api-key"] || "Not provided");
+  
+  if (apiKey && req.headers["topdarter-api-key"] !== apiKey) {
+    console.log("[AUTH] Unauthorized access attempt");
     return res.status(401).json({ success: false, error: "Unauthorized" });
   }
 
