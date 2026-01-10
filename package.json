@@ -1,0 +1,29 @@
+{
+  "name": "darterassistant-scraper",
+  "version": "1.0.0",
+  "description": "Vercel serverless scraper for Nakka tournaments",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "deploy": "vercel --prod"
+  },
+  "keywords": [
+    "scraper",
+    "nakka",
+    "darts",
+    "vercel"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@sparticuz/chromium": "^131.0.1",
+    "@vercel/node": "^3.0.21",
+    "playwright-core": "^1.48.0",
+    "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.5",
+    "playwright": "^1.48.0",
+    "typescript": "^5.3.3"
+  }
+}
