@@ -38,11 +38,14 @@ export async function scrapeTournamentsByKeyword(
       args: [
         ...chromiumPkg.args,
         "--disable-gpu",
-        "--single-process",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--no-sandbox",
         "--no-zygote",
       ],
       executablePath,
       headless: true,
+      timeout: 30000,
     });
   } else {
     // Use local Chromium for development
@@ -88,7 +91,14 @@ export async function scrapeTournamentsByKeyword(
     });
 
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(3000);
+    
+    // Wait for API response or network idle instead of arbitrary timeout
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 5000 });
+    } catch (e) {
+      // If network doesn't go idle in 5 seconds, continue anyway
+      console.log("Network didn't go idle, continuing...");
+    }
 
     console.log(`Collected: ${allApiData.length} tournaments`);
 
@@ -314,11 +324,14 @@ export async function scrapeTournamentMatches(
       args: [
         ...chromiumPkg.args,
         "--disable-gpu",
-        "--single-process",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--no-sandbox",
         "--no-zygote",
       ],
       executablePath,
       headless: true,
+      timeout: 30000,
     });
   } else {
     // Use local Chromium for development
@@ -345,7 +358,13 @@ export async function scrapeTournamentMatches(
       waitUntil: "domcontentloaded",
       timeout: 60000,
     });
-    await page.waitForTimeout(3000);
+    
+    // Wait for page to be ready instead of arbitrary timeout
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 5000 });
+    } catch (e) {
+      console.log("Network didn't go idle, continuing...");
+    }
 
     const [groupMatches, knockoutMatches] = await Promise.all([
       scrapeGroupMatches(page, tournamentId),
@@ -441,11 +460,14 @@ export async function scrapeMatchPlayerResults(
       args: [
         ...chromiumPkg.args,
         "--disable-gpu",
-        "--single-process",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--no-sandbox",
         "--no-zygote",
       ],
       executablePath,
       headless: true,
+      timeout: 30000,
     });
   } else {
     // Use local Chromium for development
@@ -469,7 +491,13 @@ export async function scrapeMatchPlayerResults(
 
     const page = await context.newPage();
     await page.goto(matchHref, { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(5000);
+    
+    // Wait for initial load
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 8000 });
+    } catch (e) {
+      console.log("Network didn't go idle, checking for Cloudflare...");
+    }
 
     // Check for Cloudflare
     const cloudflareChallenge = await page
@@ -480,14 +508,18 @@ export async function scrapeMatchPlayerResults(
       cloudflareChallenge?.includes("Just a moment") ||
       cloudflareChallenge?.includes("Cloudflare")
     ) {
-      console.log("Cloudflare challenge detected, waiting longer...");
-      await page.waitForTimeout(10000);
+      console.log("Cloudflare challenge detected, waiting for bypass...");
+      await page.waitForSelector("article", { timeout: 20000 }).catch(() => {
+        console.log("Cloudflare bypass may have failed");
+      });
     }
 
     await page.waitForSelector("article", { timeout: 15000 });
     await page.waitForSelector("#menu_stats", { timeout: 20000, state: "visible" });
-    await page.waitForTimeout(1000);
     await page.click("#menu_stats", { force: true });
+    
+    // Small delay to let click register
+    await page.waitForLoadState("domcontentloaded");
 
     await page.waitForSelector("#stats_frame", { timeout: 15000 });
     const statsFrame = page.frameLocator("#stats_frame");
