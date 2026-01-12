@@ -632,11 +632,17 @@ export async function scrapeMatchPlayerResults(
       'Cache-Control': 'no-cache',
     });
     
-    // Block heavy resources to save memory in serverless
+    // Aggressive resource blocking to minimize memory usage
     await page.route("**/*", (route) => {
-      const resourceType = route.request().resourceType();
-      // Block images, fonts, media, stylesheets - only allow documents, scripts, xhr, fetch
-      if (["image", "font", "media", "stylesheet"].includes(resourceType)) {
+      const request = route.request();
+      const resourceType = request.resourceType();
+      const url = request.url();
+      
+      // Block everything except essential resources
+      if (["image", "font", "media", "stylesheet", "websocket", "manifest", "other"].includes(resourceType)) {
+        route.abort();
+      } else if (resourceType === "script" && !url.includes("n01")) {
+        // Block third-party scripts (analytics, ads, etc.) to save memory
         route.abort();
       } else {
         route.continue();
@@ -645,14 +651,19 @@ export async function scrapeMatchPlayerResults(
     
     await page.goto(matchHref, { waitUntil: "domcontentloaded", timeout: 60000 });
     
-    // Wait for initial load
+    // Wait for initial load with shorter timeout
     try {
-      await page.waitForLoadState("networkidle", { timeout: 8000 });
+      await page.waitForLoadState("networkidle", { timeout: 5000 });
     } catch (e) {
-      console.log("Network didn't go idle, checking for Cloudflare...");
+      console.log("Network didn't go idle, continuing...");
     }
 
-    // Check for Cloudflare
+    // Check if page is still alive
+    if (page.isClosed()) {
+      throw new Error("Page was closed during navigation");
+    }
+
+    // Check for Cloudflare with shorter timeout
     const cloudflareChallenge = await page
       .$("title")
       .then((el) => el?.textContent())
@@ -662,21 +673,35 @@ export async function scrapeMatchPlayerResults(
       cloudflareChallenge?.includes("Cloudflare")
     ) {
       console.log("Cloudflare challenge detected, waiting for bypass...");
-      await page.waitForSelector("article", { timeout: 20000 }).catch(() => {
+      await page.waitForSelector("article", { timeout: 15000 }).catch(() => {
         console.log("Cloudflare bypass may have failed");
       });
     }
 
-    await page.waitForSelector("article", { timeout: 15000 });
-    await page.waitForSelector("#menu_stats", { timeout: 20000, state: "visible" });
+    // Wait for essential elements with shorter, safer timeouts
+    await page.waitForSelector("article", { timeout: 12000 });
+    
+    if (page.isClosed()) {
+      throw new Error("Page was closed while waiting for article");
+    }
+    
+    await page.waitForSelector("#menu_stats", { timeout: 12000, state: "visible" });
     await page.click("#menu_stats", { force: true });
     
-    // Small delay to let click register
-    await page.waitForLoadState("domcontentloaded");
+    // Brief wait for UI update
+    await new Promise(resolve => setTimeout(resolve, 500));
 
-    await page.waitForSelector("#stats_frame", { timeout: 15000 });
+    if (page.isClosed()) {
+      throw new Error("Page was closed after clicking stats");
+    }
+
+    await page.waitForSelector("#stats_frame", { timeout: 12000 });
     const statsFrame = page.frameLocator("#stats_frame");
-    await statsFrame.locator(".stats_table").waitFor({ timeout: 15000 });
+    await statsFrame.locator(".stats_table").waitFor({ timeout: 12000 });
+
+    if (page.isClosed()) {
+      throw new Error("Page was closed while waiting for stats frame");
+    }
 
     await page.waitForFunction(
       () => {
@@ -685,7 +710,7 @@ export async function scrapeMatchPlayerResults(
         const p1Legs = iframe.contentDocument.querySelector("#p1_legs");
         return p1Legs && p1Legs.textContent && p1Legs.textContent.trim() !== "";
       },
-      { timeout: 15000 }
+      { timeout: 12000 }
     );
 
     console.log("Stats loaded, extracting data...");
@@ -797,14 +822,24 @@ export async function scrapeMatchPlayerResults(
     console.log(`Successfully scraped results for ${results.length} players`);
     return results;
   } catch (error) {
-    await browser.close();
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    
+    // Check for various retryable errors
+    const isTimeoutError = errorMessage.includes("Timeout") || errorMessage.includes("timeout");
+    const isClosedError = errorMessage.includes("closed") || errorMessage.includes("Target page");
+    const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
+                           errorMessage.includes("ERR_OUT_OF_MEMORY");
+    
+    // Close browser before retry
+    try {
+      await browser.close();
+    } catch (e) {
+      console.log("Browser already closed");
+    }
 
-    const isTimeoutError =
-      error instanceof Error && (error.message.includes("Timeout") || error.message.includes("timeout"));
-
-    if (isTimeoutError && retryCount < maxRetries) {
+    if ((isTimeoutError || isClosedError || isResourceError) && retryCount < maxRetries) {
       const delayMs = Math.pow(2, retryCount) * 1000;
-      console.warn(`Timeout error, retrying in ${delayMs}ms...`);
+      console.warn(`Retryable error detected: ${errorMessage.substring(0, 100)}. Retrying in ${delayMs}ms...`);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       return scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier, retryCount + 1, maxRetries);
     }
@@ -812,8 +847,8 @@ export async function scrapeMatchPlayerResults(
     console.error("Error scraping match player results:", error);
     throw error;
   } finally {
-    if (browser.isConnected()) {
-      await browser.close();
+    if (browser && browser.isConnected()) {
+      await browser.close().catch(() => {});
     }
   }
 }
