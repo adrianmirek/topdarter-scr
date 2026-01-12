@@ -42,6 +42,27 @@ export async function scrapeTournamentsByKeyword(
         "--disable-setuid-sandbox",
         "--no-sandbox",
         "--no-zygote",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-blink-features=AutomationControlled",
+        // Memory saving flags
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+        "--disable-ipc-flooding-protection",
+        "--disable-renderer-backgrounding",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+        "--force-color-profile=srgb",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--disable-accelerated-2d-canvas",
+        "--disable-canvas-aa",
+        "--disable-2d-canvas-clip-aa",
       ],
       executablePath,
       headless: true,
@@ -64,12 +85,23 @@ export async function scrapeTournamentsByKeyword(
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 800, height: 600 }, // Reduced viewport to save memory
       locale: "en-US",
       timezoneId: "Europe/Warsaw",
     });
 
     const page = await context.newPage();
+    
+    // Block heavy resources to save memory in serverless
+    await page.route("**/*", (route) => {
+      const resourceType = route.request().resourceType();
+      // Block images, fonts, media - only allow documents, scripts, xhr, fetch
+      if (["image", "font", "media", "stylesheet"].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
     const allApiData: NakkaApiTournament[] = [];
 
     // Intercept API responses
@@ -328,6 +360,27 @@ export async function scrapeTournamentMatches(
         "--disable-setuid-sandbox",
         "--no-sandbox",
         "--no-zygote",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-blink-features=AutomationControlled",
+        // Memory saving flags
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+        "--disable-ipc-flooding-protection",
+        "--disable-renderer-backgrounding",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+        "--force-color-profile=srgb",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--disable-accelerated-2d-canvas",
+        "--disable-canvas-aa",
+        "--disable-2d-canvas-clip-aa",
       ],
       executablePath,
       headless: true,
@@ -350,10 +403,22 @@ export async function scrapeTournamentMatches(
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 800, height: 600 }, // Reduced viewport to save memory
     });
 
     const page = await context.newPage();
+    
+    // Block heavy resources to save memory in serverless
+    await page.route("**/*", (route) => {
+      const resourceType = route.request().resourceType();
+      // Block images, fonts, media, stylesheets - only allow documents, scripts, xhr, fetch
+      if (["image", "font", "media", "stylesheet"].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+    
     await page.goto(tournamentHref, {
       waitUntil: "domcontentloaded",
       timeout: 60000,
@@ -464,6 +529,27 @@ export async function scrapeMatchPlayerResults(
         "--disable-setuid-sandbox",
         "--no-sandbox",
         "--no-zygote",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-blink-features=AutomationControlled",
+        // Memory saving flags
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+        "--disable-ipc-flooding-protection",
+        "--disable-renderer-backgrounding",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+        "--force-color-profile=srgb",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--disable-accelerated-2d-canvas",
+        "--disable-canvas-aa",
+        "--disable-2d-canvas-clip-aa",
       ],
       executablePath,
       headless: true,
@@ -486,10 +572,22 @@ export async function scrapeMatchPlayerResults(
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 1920, height: 1080 },
+      viewport: { width: 800, height: 600 }, // Reduced viewport to save memory
     });
 
     const page = await context.newPage();
+    
+    // Block heavy resources to save memory in serverless
+    await page.route("**/*", (route) => {
+      const resourceType = route.request().resourceType();
+      // Block images, fonts, media, stylesheets - only allow documents, scripts, xhr, fetch
+      if (["image", "font", "media", "stylesheet"].includes(resourceType)) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+    
     await page.goto(matchHref, { waitUntil: "domcontentloaded", timeout: 60000 });
     
     // Wait for initial load
