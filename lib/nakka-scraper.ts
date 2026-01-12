@@ -20,7 +20,8 @@ interface NakkaApiTournament {
  * Scrapes tournaments from Nakka by keyword using Playwright with stealth
  */
 export async function scrapeTournamentsByKeyword(
-  keyword: string
+  keyword: string,
+  retryCount = 0
 ): Promise<NakkaTournamentScrapedDTO[]> {
   const url = `${NAKKA_BASE_URL}/?keyword=${encodeURIComponent(keyword)}`;
   console.log("Launching Chromium browser...");
@@ -92,11 +93,22 @@ export async function scrapeTournamentsByKeyword(
 
     const page = await context.newPage();
     
-    // Block heavy resources to save memory in serverless
+    // Disable caching to save memory
+    await page.setExtraHTTPHeaders({
+      'Cache-Control': 'no-cache',
+    });
+    
+    // Aggressive resource blocking to minimize memory usage
     await page.route("**/*", (route) => {
-      const resourceType = route.request().resourceType();
-      // Block images, fonts, media - only allow documents, scripts, xhr, fetch
-      if (["image", "font", "media", "stylesheet"].includes(resourceType)) {
+      const request = route.request();
+      const resourceType = request.resourceType();
+      const url = request.url();
+      
+      // Block everything except essential resources
+      if (["image", "font", "media", "stylesheet", "websocket", "manifest", "other"].includes(resourceType)) {
+        route.abort();
+      } else if (resourceType === "script" && !url.includes("n01")) {
+        // Block third-party scripts (analytics, ads, etc.) to save memory
         route.abort();
       } else {
         route.continue();
@@ -171,8 +183,24 @@ export async function scrapeTournamentsByKeyword(
 
     console.log(`Filtered to ${tournaments.length} completed tournaments`);
     return tournaments;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
+                           errorMessage.includes("ERR_OUT_OF_MEMORY");
+    
+    if (isResourceError && retryCount < 2) {
+      console.warn(`Memory error detected, retrying (${retryCount + 1}/2)...`);
+      await browser.close().catch(() => {});
+      // Wait a bit to let Lambda clean up
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return scrapeTournamentsByKeyword(keyword, retryCount + 1);
+    }
+    
+    throw error;
   } finally {
-    await browser.close();
+    if (browser && browser.isConnected()) {
+      await browser.close().catch(() => {});
+    }
   }
 }
 
@@ -334,7 +362,8 @@ async function scrapeKnockoutMatches(page: Page, tournamentId: string): Promise<
  * Scrapes matches from a tournament page
  */
 export async function scrapeTournamentMatches(
-  tournamentHref: string
+  tournamentHref: string,
+  retryCount = 0
 ): Promise<NakkaMatchScrapedDTO[]> {
   console.log("Launching stealth browser to scrape matches from:", tournamentHref);
 
@@ -408,6 +437,11 @@ export async function scrapeTournamentMatches(
 
     const page = await context.newPage();
     
+    // Disable caching to save memory
+    await page.setExtraHTTPHeaders({
+      'Cache-Control': 'no-cache',
+    });
+    
     // Block heavy resources to save memory in serverless
     await page.route("**/*", (route) => {
       const resourceType = route.request().resourceType();
@@ -440,8 +474,24 @@ export async function scrapeTournamentMatches(
     console.log(`Total matches scraped: ${allMatches.length}`);
 
     return allMatches;
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
+                           errorMessage.includes("ERR_OUT_OF_MEMORY");
+    
+    if (isResourceError && retryCount < 2) {
+      console.warn(`Memory error detected, retrying (${retryCount + 1}/2)...`);
+      await browser.close().catch(() => {});
+      // Wait a bit to let Lambda clean up
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return scrapeTournamentMatches(tournamentHref, retryCount + 1);
+    }
+    
+    throw error;
   } finally {
-    await browser.close();
+    if (browser && browser.isConnected()) {
+      await browser.close().catch(() => {});
+    }
   }
 }
 
@@ -576,6 +626,11 @@ export async function scrapeMatchPlayerResults(
     });
 
     const page = await context.newPage();
+    
+    // Disable caching to save memory
+    await page.setExtraHTTPHeaders({
+      'Cache-Control': 'no-cache',
+    });
     
     // Block heavy resources to save memory in serverless
     await page.route("**/*", (route) => {
