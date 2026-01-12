@@ -64,6 +64,9 @@ export async function scrapeTournamentsByKeyword(
         "--disable-accelerated-2d-canvas",
         "--disable-canvas-aa",
         "--disable-2d-canvas-clip-aa",
+        // Aggressive memory limits for serverless
+        "--js-flags=--max-old-space-size=512",
+        "--max_old_space_size=512",
       ],
       executablePath,
       headless: true,
@@ -410,6 +413,9 @@ export async function scrapeTournamentMatches(
         "--disable-accelerated-2d-canvas",
         "--disable-canvas-aa",
         "--disable-2d-canvas-clip-aa",
+        // Aggressive memory limits for serverless
+        "--js-flags=--max-old-space-size=512",
+        "--max_old_space_size=512",
       ],
       executablePath,
       headless: true,
@@ -600,6 +606,9 @@ export async function scrapeMatchPlayerResults(
         "--disable-accelerated-2d-canvas",
         "--disable-canvas-aa",
         "--disable-2d-canvas-clip-aa",
+        // Aggressive memory limits for serverless
+        "--js-flags=--max-old-space-size=512",
+        "--max_old_space_size=512",
       ],
       executablePath,
       headless: true,
@@ -622,7 +631,8 @@ export async function scrapeMatchPlayerResults(
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 800, height: 600 }, // Reduced viewport to save memory
+      viewport: { width: 480, height: 320 }, // Minimal viewport to save maximum memory
+      javaScriptEnabled: true, // Ensure JS is enabled for the stats iframe
     });
 
     const page = await context.newPage();
@@ -630,6 +640,7 @@ export async function scrapeMatchPlayerResults(
     // Disable caching to save memory
     await page.setExtraHTTPHeaders({
       'Cache-Control': 'no-cache',
+      'Accept-Encoding': 'gzip', // Reduce bandwidth/memory
     });
     
     // Aggressive resource blocking to minimize memory usage
@@ -649,19 +660,16 @@ export async function scrapeMatchPlayerResults(
       }
     });
     
-    await page.goto(matchHref, { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto(matchHref, { waitUntil: "domcontentloaded", timeout: 45000 });
     
-    // Wait for initial load with shorter timeout
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 5000 });
-    } catch (e) {
-      console.log("Network didn't go idle, continuing...");
-    }
-
-    // Check if page is still alive
+    // Check if page is still alive immediately
     if (page.isClosed()) {
-      throw new Error("Page was closed during navigation");
+      throw new Error("ERR_INSUFFICIENT_RESOURCES: Page closed immediately after navigation - Lambda out of memory");
     }
+    
+    // Skip network idle check - it wastes time and memory in serverless
+    // Just wait a tiny bit for DOM to settle
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     // Check for Cloudflare with shorter timeout
     const cloudflareChallenge = await page
@@ -824,22 +832,30 @@ export async function scrapeMatchPlayerResults(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     
-    // Check for various retryable errors
-    const isTimeoutError = errorMessage.includes("Timeout") || errorMessage.includes("timeout");
-    const isClosedError = errorMessage.includes("closed") || errorMessage.includes("Target page");
-    const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
-                           errorMessage.includes("ERR_OUT_OF_MEMORY");
-    
     // Close browser before retry
     try {
       await browser.close();
     } catch (e) {
       console.log("Browser already closed");
     }
-
-    if ((isTimeoutError || isClosedError || isResourceError) && retryCount < maxRetries) {
+    
+    // If page closed during navigation, it's a resource issue - DON'T retry
+    const isNavigationClosure = errorMessage.includes("Page closed immediately after navigation") ||
+                                errorMessage.includes("closed during navigation");
+    
+    if (isNavigationClosure) {
+      console.error("Lambda out of memory - page closed during navigation. This requires Vercel Pro or alternative hosting.");
+      throw error;
+    }
+    
+    // Only retry for transient errors that might succeed on retry
+    const isTimeoutError = errorMessage.includes("Timeout") || errorMessage.includes("timeout");
+    const isClosedAfterLoad = errorMessage.includes("closed while waiting") || 
+                              errorMessage.includes("closed after clicking");
+    
+    if ((isTimeoutError || isClosedAfterLoad) && retryCount < maxRetries) {
       const delayMs = Math.pow(2, retryCount) * 1000;
-      console.warn(`Retryable error detected: ${errorMessage.substring(0, 100)}. Retrying in ${delayMs}ms...`);
+      console.warn(`Transient error detected: ${errorMessage.substring(0, 100)}. Retrying in ${delayMs}ms...`);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
       return scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier, retryCount + 1, maxRetries);
     }
