@@ -17,6 +17,277 @@ interface NakkaApiTournament {
 }
 
 /**
+ * Scrapes tournament date from the Results tab by finding the first match date
+ */
+async function scrapeTournamentDateFromResults(
+  tournamentId: string,
+  existingPage: Page
+): Promise<Date | null> {
+  try {
+    // First try: Call the history API directly to get match data
+    const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${tournamentId}&skip=0&count=30&name=`;
+    
+    console.log(`Fetching match history from API directly`);
+    
+    const apiResponse = await existingPage.evaluate(async (url) => {
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        return { success: true, data, dataType: Array.isArray(data) ? 'array' : typeof data, length: Array.isArray(data) ? data.length : 0 };
+      } catch (error) {
+        return { success: false, error: String(error) };
+      }
+    }, historyApiUrl);
+    
+    console.log('API Response:', JSON.stringify(apiResponse, null, 2).substring(0, 500));
+    
+    if (apiResponse.success && apiResponse.data && apiResponse.data.list && Array.isArray(apiResponse.data.list) && apiResponse.data.list.length > 0) {
+      console.log(`Received ${apiResponse.data.list.length} matches from history API`);
+      
+      // Look for the first match with a date
+      for (const match of apiResponse.data.list) {
+        if (match.startTime && match.startTime > 0) {
+          // startTime is a Unix timestamp
+          const matchDate = new Date(match.startTime * 1000);
+          
+          // Subtract 4 hours to account for finals being played later/next day
+          matchDate.setHours(matchDate.getHours() - 4);
+          
+          // Strip time component - keep only the date at midnight UTC
+          const parsedDate = new Date(Date.UTC(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate(), 0, 0, 0, 0));
+          
+          if (!isNaN(parsedDate.getTime())) {
+            console.log(`Scraped date ${parsedDate.toISOString()} from match history API for tournament ${tournamentId} (adjusted -4 hours, time stripped)`);
+            return parsedDate;
+          }
+        }
+      }
+      
+      console.log('Match data received but no valid dates found');
+    } else {
+      const hasList = apiResponse.data && apiResponse.data.list;
+      const listLength = hasList && Array.isArray(apiResponse.data.list) ? apiResponse.data.list.length : 0;
+      console.log(`No match data from history API (success: ${apiResponse.success}, hasList: ${!!hasList}, listLength: ${listLength})`);
+    }
+  } catch (apiError) {
+    console.log('API call failed:', apiError);
+  }
+  
+  // Navigate directly to the Results tab using URL parameter
+  const historyUrl = `${NAKKA_BASE_URL}/comp.php?id=${tournamentId}&tab=history`;
+  
+  try {
+    console.log(`Navigating to Results tab: ${historyUrl}`);
+    
+    // Track network requests to find the API endpoint
+    const apiRequests: string[] = [];
+    existingPage.on("request", (request) => {
+      const url = request.url();
+      if (url.includes('.php') && (url.includes(tournamentId) || url.includes('history') || url.includes('match'))) {
+        apiRequests.push(url);
+        console.log('API request:', url);
+      }
+    });
+    
+    // Try with increased wait and multiple checks
+    await existingPage.goto(historyUrl, { 
+      waitUntil: "networkidle",
+      timeout: 45000 
+    });
+    
+    console.log('Page loaded, API requests captured:', apiRequests.length);
+    
+    // Wait longer for dynamic content
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Try to get the page HTML and look for match data directly
+    const pageContent = await existingPage.content();
+    
+    // Look for date patterns in the raw HTML
+    let dateMatches = pageContent.match(/(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/g);
+    
+    if (dateMatches && dateMatches.length > 0) {
+      console.log(`Found ${dateMatches.length} dates in page HTML`);
+      const firstDateStr = dateMatches[0];
+      const dateMatch = firstDateStr.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+      
+      if (dateMatch) {
+        const day = parseInt(dateMatch[1], 10);
+        const month = parseInt(dateMatch[2], 10) - 1;
+        const year = parseInt(dateMatch[3], 10);
+        const parsedDate = new Date(year, month, day);
+        
+        if (!isNaN(parsedDate.getTime())) {
+          console.log(`Scraped date ${parsedDate.toISOString()} from page HTML for tournament ${tournamentId}`);
+          return parsedDate;
+        }
+      }
+    }
+    
+    // If no dates in slash format, try dot format (DD.MM.YYYY)
+    if (!dateMatches) {
+      dateMatches = pageContent.match(/(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/g);
+      
+      if (dateMatches && dateMatches.length > 0) {
+        console.log(`Found ${dateMatches.length} dates (dot format) in page HTML`);
+        const firstDateStr = dateMatches[0];
+        const dateMatch = firstDateStr.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+        
+        if (dateMatch) {
+          const day = parseInt(dateMatch[1], 10);
+          const month = parseInt(dateMatch[2], 10) - 1;
+          const year = parseInt(dateMatch[3], 10);
+          const parsedDate = new Date(year, month, day);
+          
+          if (!isNaN(parsedDate.getTime())) {
+            console.log(`Scraped date ${parsedDate.toISOString()} from page HTML (dot format) for tournament ${tournamentId}`);
+            return parsedDate;
+          }
+        }
+      }
+    }
+    
+    console.log('No date patterns found in HTML, match results may be loaded dynamically');
+
+    
+    // Wait for the match list elements with actual date content to appear
+    try {
+      console.log('Waiting for match results content to load...');
+      await existingPage.waitForFunction(
+        () => {
+          const elements = document.querySelectorAll('div, span, td');
+          for (let i = 0; i < elements.length; i++) {
+            const text = elements[i].textContent?.trim();
+            // Look for date pattern DD/MM/YYYY HH:MM:SS
+            if (text && text.match(/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/)) {
+              return true;
+            }
+          }
+          return false;
+        },
+        { timeout: 10000 }
+      );
+      console.log('Match list content populated');
+    } catch (waitError) {
+      console.log('Match list content did not populate, tournament may not have results recorded yet');
+    }
+    
+    // Extract date from the first match in the Results tab
+    const matchInfo = await existingPage.evaluate(() => {
+      // Try multiple selectors for different tournament page structures
+      let matchTitleElements = document.querySelectorAll('.match_list_title_td');
+      
+      if (matchTitleElements.length === 0) {
+        // Try alternative selector for different page structure
+        matchTitleElements = document.querySelectorAll('.m_match_title');
+      }
+      
+      // Also try searching for any element with date-like text content
+      if (matchTitleElements.length === 0 || !matchTitleElements[0]?.textContent?.trim()) {
+        // Try broader search - look for any element containing date patterns
+        const allDivs = document.querySelectorAll('div, span, td');
+        for (let i = 0; i < allDivs.length; i++) {
+          const element = allDivs[i];
+          const text = element.textContent?.trim();
+          if (text && text.match(/\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/)) {
+            // Found an element with a date in it
+            matchTitleElements = [element] as any;
+            break;
+          }
+        }
+      }
+      
+      // Debug: return info about what we found
+      const elementsFound = matchTitleElements.length;
+      const allTextRaw = Array.from(matchTitleElements).slice(0, 3).map(el => ({
+        text: el.textContent?.trim()?.substring(0, 150),
+        innerHTML: el.innerHTML?.substring(0, 100),
+        className: el.className
+      }));
+      
+      // Get the first match element
+      if (matchTitleElements.length > 0) {
+        const firstElement = matchTitleElements[0];
+        const text = firstElement.textContent?.trim();
+        
+        if (text) {
+          // Match format 1: "DD.MM.YYYY HH:MM:SS - Tournament Name"
+          // Match format 2: "DD/MM/YYYY HH:MM:SS - Tournament Name" (slash format)
+          // Match format 3: Just "DD.MM.YYYY" or "DD/MM/YYYY"
+          let dateMatch = text.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+          if (!dateMatch) {
+            dateMatch = text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+          }
+          
+          if (dateMatch) {
+            return { found: true, text, elementsCount: elementsFound };
+          }
+        }
+      }
+      
+      return { found: false, elementsCount: elementsFound, sampleElements: allTextRaw };
+    });
+    
+    console.log(`Match elements info:`, JSON.stringify(matchInfo, null, 2));
+    
+    if (matchInfo.found && matchInfo.text) {
+      // Parse the date string - support both . and / separators
+      let dateMatch = matchInfo.text.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+      if (!dateMatch) {
+        dateMatch = matchInfo.text.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      }
+      
+      if (dateMatch) {
+        const day = parseInt(dateMatch[1], 10);
+        const month = parseInt(dateMatch[2], 10) - 1; // JS months are 0-indexed
+        const year = parseInt(dateMatch[3], 10);
+        const parsedDate = new Date(year, month, day);
+        
+        if (!isNaN(parsedDate.getTime())) {
+          console.log(`Scraped date ${parsedDate.toISOString()} from first match in Results tab for tournament ${tournamentId}`);
+          return parsedDate;
+        }
+      }
+    }
+    
+    // Fallback: If no match results found, try to get date from page title
+    console.log('No match results found, trying page title...');
+    const titleDate = await existingPage.evaluate(() => {
+      const title = document.title;
+      // Match DD.MM.YYYY format in title
+      const dateMatch = title.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+      if (dateMatch) {
+        return {
+          found: true,
+          day: dateMatch[1],
+          month: dateMatch[2],
+          year: dateMatch[3]
+        };
+      }
+      return { found: false };
+    });
+    
+    if (titleDate.found) {
+      const day = parseInt(titleDate.day, 10);
+      const month = parseInt(titleDate.month, 10) - 1;
+      const year = parseInt(titleDate.year, 10);
+      const parsedDate = new Date(year, month, day);
+      
+      if (!isNaN(parsedDate.getTime())) {
+        console.log(`Scraped date ${parsedDate.toISOString()} from page title for tournament ${tournamentId}`);
+        return parsedDate;
+      }
+    }
+    
+    console.warn(`No valid date found in Results tab or page title for tournament ${tournamentId}`);
+    return null;
+  } catch (error) {
+    console.error(`Error scraping date from Results tab for tournament ${tournamentId}:`, error);
+    return null;
+  }
+}
+
+/**
  * Scrapes tournaments from Nakka by keyword using Playwright with stealth
  */
 export async function scrapeTournamentsByKeyword(
@@ -161,8 +432,22 @@ export async function scrapeTournamentsByKeyword(
 
     for (const item of allApiData) {
       let parsedDate: Date | null = null;
-      if (item.t_date && item.t_date > 0) {
-        parsedDate = new Date(item.t_date * 1000);
+      
+      // First, try to get date from API
+      //if (item.t_date && item.t_date > 0) {
+      //  parsedDate = new Date(item.t_date * 1000);
+      //}
+      
+      // If no date from API and tournament is completed, scrape from Results tab
+      if (!parsedDate && item.tdid && item.status === Number(NAKKA_STATUS_CODES.COMPLETED)) {
+        console.log(`No API date for tournament ${item.tdid}, fetching from Results tab...`);
+        try {
+          parsedDate = await scrapeTournamentDateFromResults(item.tdid, page);
+        } catch (error) {
+          console.error(`Failed to scrape date for tournament ${item.tdid}:`, error);
+          // Skip this tournament if we can't get a date
+          continue;
+        }
       }
 
       if (
