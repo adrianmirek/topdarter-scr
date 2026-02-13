@@ -14,6 +14,7 @@ export interface NakkaMatchScrapedDTO {
   second_player_name: string;
   second_player_code: string;
   href: string;
+  match_date?: Date | null;
 }
 
 export interface NakkaMatchPlayerResultScrapedDTO {

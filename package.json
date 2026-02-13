@@ -5,6 +5,8 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
+    "build": "tsc",
+    "test:matches": "npm run build && node test-match-dates.js",
     "deploy": "vercel --prod"
   },
   "keywords": [

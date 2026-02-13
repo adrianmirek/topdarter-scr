@@ -16,6 +16,15 @@ interface NakkaApiTournament {
   createTime?: number;
 }
 
+interface NakkaApiMatchHistory {
+  startTime: number;
+  tpid: string;
+  vstpid: string;
+  round: string;
+  ttype: string;
+  subtitle?: string;
+}
+
 /**
  * Scrapes tournament date from the Results tab by finding the first match date
  */
@@ -285,6 +294,97 @@ async function scrapeTournamentDateFromResults(
     console.error(`Error scraping date from Results tab for tournament ${tournamentId}:`, error);
     return null;
   }
+}
+
+/**
+ * Fetches match dates from the History API for a tournament
+ * Returns a map of match identifier to match date
+ */
+async function fetchMatchDatesFromHistoryApi(
+  tournamentId: string,
+  page: Page
+): Promise<Map<string, Date>> {
+  const matchDateMap = new Map<string, Date>();
+  
+  try {
+    console.log(`Fetching match dates from History API for tournament ${tournamentId}`);
+    
+    let skip = 0;
+    const batchSize = 100;
+    let hasMore = true;
+    let totalFetched = 0;
+    const maxIterations = 20; // Safety limit: max 2000 matches (20 * 100)
+    let iterations = 0;
+    
+    // Paginate through all matches
+    while (hasMore && iterations < maxIterations) {
+      iterations++;
+      const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${tournamentId}&skip=${skip}&count=${batchSize}&name=`;
+      
+      const apiResponse = await page.evaluate(async (url) => {
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          return { success: true, data };
+        } catch (error) {
+          return { success: false, error: String(error) };
+        }
+      }, historyApiUrl);
+      
+      if (apiResponse.success && apiResponse.data?.list && Array.isArray(apiResponse.data.list)) {
+        const matches = apiResponse.data.list;
+        console.log(`Batch ${iterations}: Received ${matches.length} matches from History API (skip: ${skip}, total so far: ${totalFetched + matches.length})`);
+        totalFetched += matches.length;
+        
+        for (const match of matches) {
+          if (match.startTime && match.startTime > 0 && match.tmid) {
+            const matchDate = new Date(match.startTime * 1000);
+            
+            // The API provides the full match identifier in tmid field
+            // We need to convert it to match our scraped format:
+            // API format: "t_Z2rJ_4495_t_3_NN2M_hJvk"
+            // Our format: "t_Z2rJ_4495_t_3_hJvk_NN2M" (sorted player codes)
+            
+            const parts = match.tmid.split('_');
+            if (parts.length >= 5) {
+              const tournamentPart = parts.slice(0, 3).join('_'); // e.g., "t_Z2rJ_4495"
+              const matchType = parts[3]; // e.g., "t" or "rr"
+              const round = parts[4]; // e.g., "3"
+              const player1 = parts[parts.length - 2];
+              const player2 = parts[parts.length - 1];
+              
+              // Sort player codes to match our scraping format
+              const [firstCode, secondCode] = [player1, player2].sort();
+              const identifier = `${tournamentPart}_${matchType}_${round}_${firstCode}_${secondCode}`;
+              
+              matchDateMap.set(identifier, matchDate);
+            }
+          }
+        }
+        
+        // Check if we should fetch more
+        if (matches.length < batchSize) {
+          hasMore = false;
+          console.log(`Last batch received (${matches.length} < ${batchSize}), stopping pagination`);
+        } else {
+          skip += batchSize;
+        }
+      } else {
+        console.log('No match data received from History API');
+        hasMore = false;
+      }
+    }
+    
+    if (iterations >= maxIterations) {
+      console.warn(`⚠️  Reached maximum iteration limit (${maxIterations} batches). Some matches may not have dates.`);
+    }
+    
+    console.log(`✅ Fetched ${totalFetched} total matches from API, mapped dates for ${matchDateMap.size} matches`);
+  } catch (error) {
+    console.error('Error fetching match dates from History API:', error);
+  }
+  
+  return matchDateMap;
 }
 
 /**
@@ -756,15 +856,27 @@ export async function scrapeTournamentMatches(
       console.log("Network didn't go idle, continuing...");
     }
 
+    // Fetch match dates from History API
+    const matchDateMap = await fetchMatchDatesFromHistoryApi(tournamentId, page);
+
     const [groupMatches, knockoutMatches] = await Promise.all([
       scrapeGroupMatches(page, tournamentId),
       scrapeKnockoutMatches(page, tournamentId),
     ]);
 
     const allMatches = [...groupMatches, ...knockoutMatches];
-    console.log(`Total matches scraped: ${allMatches.length}`);
+    
+    // Enrich matches with dates
+    const enrichedMatches = allMatches.map(match => ({
+      ...match,
+      match_date: matchDateMap.get(match.nakka_match_identifier) || null
+    }));
+    
+    const matchesWithDates = enrichedMatches.filter(m => m.match_date).length;
+    console.log(`Total matches scraped: ${enrichedMatches.length}`);
+    console.log(`Matches with dates: ${matchesWithDates}/${enrichedMatches.length}`);
 
-    return allMatches;
+    return enrichedMatches;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
