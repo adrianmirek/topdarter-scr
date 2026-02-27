@@ -1,5 +1,5 @@
 ﻿const testUrls = [
-  'https://n01darts.com/n01/tournament/script/n01_tournament.php?cmd=get_list&keyword=agawa',
+  'https://n01darts.com/n01/tournament/script/n01_tournament.php?cmd=get_list&keyword=Steel Cranes Zima \'26',
   'https://n01darts.com/n01/tournament/n01_tournament.php?cmd=get_list&keyword=agawa',
   'https://n01darts.com/script/n01_tournament.php?cmd=get_list&keyword=agawa'
 ];

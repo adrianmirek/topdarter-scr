@@ -17,11 +17,17 @@ interface NakkaApiTournament {
 }
 
 interface NakkaApiMatchHistory {
+  tmid: string;
   startTime: number;
   tpid: string;
   vstpid: string;
+  p1tpid: string;
+  p2tpid: string;
+  p1name: string;
+  p2name: string;
   round: string;
   ttype: string;
+  title: string;
   subtitle?: string;
 }
 
@@ -593,167 +599,13 @@ export async function scrapeTournamentsByKeyword(
 }
 
 /**
- * Parses match type from subtitle and base type
- */
-function parseMatchType(subtitle: string | null, baseType: string): string {
-  if (baseType === "rr") return "rr";
-  if (!subtitle) return "t_unknown";
-  return `t_${subtitle.toLowerCase().replace(/\s+/g, "_")}`;
-}
-
-/**
- * Extracts player names from the page for a given match
- */
-async function extractPlayerNamesForMatch(
-  page: Page,
-  tpid: string,
-  vstpid: string
-): Promise<{ first: string; second: string }> {
-  const firstPlayerElement = await page.$(`[tpid="${tpid}"] .entry_name`);
-  const secondPlayerElement = await page.$(`[tpid="${vstpid}"] .entry_name`);
-
-  const first = firstPlayerElement ? (await firstPlayerElement.textContent())?.trim() || "Unknown" : "Unknown";
-  const second = secondPlayerElement ? (await secondPlayerElement.textContent())?.trim() || "Unknown" : "Unknown";
-
-  return { first, second };
-}
-
-/**
- * Extracts opponent name from the page by player code
- */
-async function extractOpponentName(page: Page, vstpid: string): Promise<string> {
-  const element = await page.$(`[tpid="${vstpid}"] .entry_name`);
-  return element ? (await element.textContent())?.trim() || "Unknown" : "Unknown";
-}
-
-/**
- * Scrapes group stage (round-robin) matches from tournament page
- */
-async function scrapeGroupMatches(page: Page, tournamentId: string): Promise<NakkaMatchScrapedDTO[]> {
-  const matches: NakkaMatchScrapedDTO[] = [];
-  const seenIdentifiers = new Set<string>();
-
-  const rrContainer = await page.$("#rr_container");
-  if (!rrContainer) {
-    console.log("No #rr_container found - skipping group matches");
-    return matches;
-  }
-
-  const results = await page.$$(".rr_result.view_button");
-  console.log(`Found ${results.length} potential group match elements`);
-
-  for (const result of results) {
-    try {
-      const ttype = await result.getAttribute("ttype");
-      if (ttype !== "rr") continue;
-
-      const subtitle = await result.getAttribute("subtitle");
-      const round = (await result.getAttribute("round")) || "0";
-      const tpid = await result.getAttribute("tpid");
-      const vstpid = await result.getAttribute("vstpid");
-
-      if (!tpid || !vstpid) continue;
-
-      const hasAverage = await result.$(".r_avg");
-      if (!hasAverage) continue;
-
-      const [firstCode, secondCode] = [tpid, vstpid].sort();
-      const identifier = `${tournamentId}_rr_${round}_${firstCode}_${secondCode}`;
-      const href = `${NAKKA_BASE_URL}/n01_view.html?tmid=${identifier}`;
-
-      if (seenIdentifiers.has(identifier)) continue;
-      seenIdentifiers.add(identifier);
-
-      const playerNames = await extractPlayerNamesForMatch(page, tpid, vstpid);
-
-      matches.push({
-        nakka_match_identifier: identifier,
-        match_type: parseMatchType(subtitle, "rr"),
-        first_player_name: playerNames.first,
-        first_player_code: firstCode,
-        second_player_name: playerNames.second,
-        second_player_code: secondCode,
-        href,
-      });
-
-      console.log(`Scraped group match: ${identifier}`);
-    } catch (error) {
-      console.error("Error scraping group match:", error);
-    }
-  }
-
-  console.log(`Total group matches scraped: ${matches.length}`);
-  return matches;
-}
-
-/**
- * Scrapes knockout stage matches from tournament page
- */
-async function scrapeKnockoutMatches(page: Page, tournamentId: string): Promise<NakkaMatchScrapedDTO[]> {
-  const matches: NakkaMatchScrapedDTO[] = [];
-  const seenIdentifiers = new Set<string>();
-
-  const bracketContainer = await page.$("#bracket_container");
-  if (!bracketContainer) {
-    console.log("No #bracket_container found - skipping knockout matches");
-    return matches;
-  }
-
-  const items = await page.$$('.t_item.view_button[ttype="t"]');
-  console.log(`Found ${items.length} potential knockout match elements`);
-
-  for (const item of items) {
-    try {
-      const ttype = await item.getAttribute("ttype");
-      if (ttype !== "t") continue;
-
-      const subtitle = await item.getAttribute("subtitle");
-      const round = (await item.getAttribute("round")) || "0";
-      const tpid = await item.getAttribute("tpid");
-      const vstpid = await item.getAttribute("vstpid");
-
-      if (!tpid || !vstpid) continue;
-
-      const [firstCode, secondCode] = [tpid, vstpid].sort();
-      const identifier = `${tournamentId}_t_${round}_${firstCode}_${secondCode}`;
-      const href = `${NAKKA_BASE_URL}/n01_view.html?tmid=${identifier}`;
-
-      if (seenIdentifiers.has(identifier)) continue;
-      seenIdentifiers.add(identifier);
-
-      const playerName = await item
-        .$eval(".entry_name", (el) => el.textContent?.trim() || "Unknown")
-        .catch(() => "Unknown");
-      const opponentName = await extractOpponentName(page, vstpid);
-
-      matches.push({
-        nakka_match_identifier: identifier,
-        match_type: parseMatchType(subtitle, "t"),
-        first_player_name: playerName,
-        first_player_code: firstCode,
-        second_player_name: opponentName,
-        second_player_code: secondCode,
-        href,
-      });
-
-      console.log(`Scraped knockout match: ${identifier}`);
-    } catch (error) {
-      console.error("Error scraping knockout match:", error);
-    }
-  }
-
-  console.log(`Total knockout matches scraped: ${matches.length}`);
-  return matches;
-}
-
-/**
- * Scrapes matches from a tournament page
+ * Fetches matches from a tournament using the History API
  */
 export async function scrapeTournamentMatches(
   tournamentHref: string,
   retryCount = 0
 ): Promise<NakkaMatchScrapedDTO[]> {
-  console.log("Launching stealth browser to scrape matches from:", tournamentHref);
+  console.log("Fetching matches from API for:", tournamentHref);
 
   const tournamentIdMatch = tournamentHref.match(/[?&]id=([^&]+)/);
   if (!tournamentIdMatch) {
@@ -823,60 +675,85 @@ export async function scrapeTournamentMatches(
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 800, height: 600 }, // Reduced viewport to save memory
     });
 
     const page = await context.newPage();
     
-    // Disable caching to save memory
-    await page.setExtraHTTPHeaders({
-      'Cache-Control': 'no-cache',
-    });
+    console.log(`Fetching matches from History API for tournament ${tournamentId}`);
     
-    // Block heavy resources to save memory in serverless
-    await page.route("**/*", (route) => {
-      const resourceType = route.request().resourceType();
-      // Block images, fonts, media, stylesheets - only allow documents, scripts, xhr, fetch
-      if (["image", "font", "media", "stylesheet"].includes(resourceType)) {
-        route.abort();
+    const matches: NakkaMatchScrapedDTO[] = [];
+    let skip = 0;
+    const batchSize = 100;
+    let hasMore = true;
+    let totalFetched = 0;
+    const maxIterations = 20; // Safety limit: max 2000 matches (20 * 100)
+    let iterations = 0;
+    
+    // Paginate through all matches
+    while (hasMore && iterations < maxIterations) {
+      iterations++;
+      const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${tournamentId}&skip=${skip}&count=${batchSize}&name=`;
+      
+      const apiResponse = await page.evaluate(async (url) => {
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          return { success: true, data };
+        } catch (error) {
+          return { success: false, error: String(error) };
+        }
+      }, historyApiUrl);
+      
+      if (apiResponse.success && apiResponse.data?.list && Array.isArray(apiResponse.data.list)) {
+        const matchesData = apiResponse.data.list as NakkaApiMatchHistory[];
+        console.log(`Batch ${iterations}: Received ${matchesData.length} matches from History API (skip: ${skip}, total so far: ${totalFetched + matchesData.length})`);
+        totalFetched += matchesData.length;
+        
+        for (const match of matchesData) {
+          if (match.tmid && match.p1tpid && match.p2tpid) {
+            // Parse match date from startTime
+            let matchDate: Date | null = null;
+            if (match.startTime && match.startTime > 0) {
+              matchDate = new Date(match.startTime * 1000);
+            }
+            
+            const href = `https://n01darts.com/n01/tournament/n01_view.html?tmid=${match.tmid}`;
+            
+            matches.push({
+              nakka_match_identifier: match.tmid,
+              match_type: match.title || "unknown",
+              first_player_name: match.p1name || "Unknown",
+              first_player_code: match.p1tpid,
+              second_player_name: match.p2name || "Unknown",
+              second_player_code: match.p2tpid,
+              href,
+              match_date: matchDate,
+            });
+          }
+        }
+        
+        // Check if we should fetch more
+        if (matchesData.length < batchSize) {
+          hasMore = false;
+          console.log(`Last batch received (${matchesData.length} < ${batchSize}), stopping pagination`);
+        } else {
+          skip += batchSize;
+        }
       } else {
-        route.continue();
+        console.log('No match data received from History API');
+        hasMore = false;
       }
-    });
-    
-    await page.goto(tournamentHref, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000,
-    });
-    
-    // Wait for page to be ready instead of arbitrary timeout
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 5000 });
-    } catch (e) {
-      console.log("Network didn't go idle, continuing...");
     }
-
-    // Fetch match dates from History API
-    const matchDateMap = await fetchMatchDatesFromHistoryApi(tournamentId, page);
-
-    const [groupMatches, knockoutMatches] = await Promise.all([
-      scrapeGroupMatches(page, tournamentId),
-      scrapeKnockoutMatches(page, tournamentId),
-    ]);
-
-    const allMatches = [...groupMatches, ...knockoutMatches];
     
-    // Enrich matches with dates
-    const enrichedMatches = allMatches.map(match => ({
-      ...match,
-      match_date: matchDateMap.get(match.nakka_match_identifier) || null
-    }));
+    if (iterations >= maxIterations) {
+      console.warn(`⚠️  Reached maximum iteration limit (${maxIterations} batches). Some matches may not be fetched.`);
+    }
     
-    const matchesWithDates = enrichedMatches.filter(m => m.match_date).length;
-    console.log(`Total matches scraped: ${enrichedMatches.length}`);
-    console.log(`Matches with dates: ${matchesWithDates}/${enrichedMatches.length}`);
+    const matchesWithDates = matches.filter(m => m.match_date).length;
+    console.log(`✅ Total matches fetched: ${matches.length}`);
+    console.log(`Matches with dates: ${matchesWithDates}/${matches.length}`);
 
-    return enrichedMatches;
+    return matches;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
@@ -925,8 +802,6 @@ function extractMatchIdentifierComponents(nakkaMatchIdentifier: string): {
   tournamentId: string;
   matchType: string;
   round: string;
-  firstPlayerCode: string;
-  secondPlayerCode: string;
 } | null {
   const parts = nakkaMatchIdentifier.split("_");
 
@@ -938,15 +813,11 @@ function extractMatchIdentifierComponents(nakkaMatchIdentifier: string): {
   const tournamentId = parts.slice(0, 3).join("_");
   const matchType = parts[3];
   const round = parts[4];
-  const firstPlayerCode = parts[parts.length - 2];
-  const secondPlayerCode = parts[parts.length - 1];
 
   return {
     tournamentId,
     matchType,
-    round,
-    firstPlayerCode,
-    secondPlayerCode,
+    round
   };
 }
 
@@ -956,6 +827,8 @@ function extractMatchIdentifierComponents(nakkaMatchIdentifier: string): {
 export async function scrapeMatchPlayerResults(
   matchHref: string,
   nakkaMatchIdentifier: string,
+  firstPlayerCode: string,
+  secondPlayerCode: string,
   retryCount = 0,
   maxRetries = 3
 ): Promise<NakkaMatchPlayerResultScrapedDTO[]> {
@@ -1186,7 +1059,7 @@ export async function scrapeMatchPlayerResults(
     };
 
     for (let playerIndex = 0; playerIndex < 2; playerIndex++) {
-      const playerCode = playerIndex === 0 ? components.firstPlayerCode : components.secondPlayerCode;
+      const playerCode = playerIndex === 0 ? firstPlayerCode : secondPlayerCode;
       const nakkaMatchPlayerIdentifier = `${components.tournamentId}_${components.matchType}_${components.round}_${playerCode}`;
 
       const prefix = playerIndex === 0 ? "p1_" : "p2_";
@@ -1254,7 +1127,7 @@ export async function scrapeMatchPlayerResults(
       const delayMs = Math.pow(2, retryCount) * 1000;
       console.warn(`Transient error detected: ${errorMessage.substring(0, 100)}. Retrying in ${delayMs}ms...`);
       await new Promise((resolve) => setTimeout(resolve, delayMs));
-      return scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier, retryCount + 1, maxRetries);
+      return scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode, retryCount + 1, maxRetries);
     }
 
     console.error("Error scraping match player results:", error);

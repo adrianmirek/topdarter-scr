@@ -26,18 +26,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { matchHref, nakkaMatchIdentifier } = req.body;
+    const { matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode } = req.body;
 
-    if (!matchHref || !nakkaMatchIdentifier) {
+    if (!matchHref || !nakkaMatchIdentifier || !firstPlayerCode || !secondPlayerCode) {
       return res.status(400).json({
         success: false,
-        error: "Missing matchHref or nakkaMatchIdentifier parameter",
+        error: "Missing required parameters: matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode",
       });
     }
 
     console.log(`[API] Scraping player results for match: ${nakkaMatchIdentifier}`);
 
-    const playerResults = await scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier);
+    const playerResults = await scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode);
 
     console.log(`[API] Successfully scraped ${playerResults.length} player results`);
 
