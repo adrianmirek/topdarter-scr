@@ -901,7 +901,7 @@ export async function scrapeMatchPlayerResults(
     const context = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 480, height: 320 }, // Minimal viewport to save maximum memory
+      viewport: { width: 1024, height: 768 }, // Standard viewport size to keep elements in view
       javaScriptEnabled: true, // Ensure JS is enabled for the stats iframe
     });
 
@@ -981,39 +981,43 @@ export async function scrapeMatchPlayerResults(
       throw new Error("Page was closed while waiting for stats frame");
     }
 
-    await page.waitForFunction(
-      () => {
-        const iframe = document.querySelector("#stats_frame") as HTMLIFrameElement;
-        if (!iframe || !iframe.contentDocument) return false;
-        const p1Legs = iframe.contentDocument.querySelector("#p1_legs");
-        return p1Legs && p1Legs.textContent && p1Legs.textContent.trim() !== "";
-      },
-      { timeout: 12000 }
-    );
+    await page.waitForFunction(new Function(`
+      const iframe = document.querySelector("#stats_frame");
+      if (!iframe || !iframe.contentDocument) return false;
+      const p1Legs = iframe.contentDocument.querySelector("#p1_legs");
+      return p1Legs && p1Legs.textContent && p1Legs.textContent.trim() !== "";
+    `) as any, { timeout: 12000 });
 
     console.log("Stats loaded, extracting data...");
 
-    // Get player names
-    const playerNames = await page.evaluate(() => {
-      const iframe = document.querySelector("#stats_frame") as HTMLIFrameElement;
+    // Get player names - use Function constructor to avoid TypeScript transpilation
+    const playerNames = await page.evaluate(new Function(`
+      const iframe = document.querySelector("#stats_frame");
       if (!iframe || !iframe.contentDocument) return [];
       const nameTexts = iframe.contentDocument.querySelectorAll(".name_text");
-      return Array.from(nameTexts).map((el) => el.textContent?.trim() || "");
-    });
+      const result = [];
+      for (let i = 0; i < nameTexts.length; i++) {
+        const el = nameTexts[i];
+        const text = el.textContent;
+        result.push(text ? text.trim() : "");
+      }
+      return result;
+    `) as any);
 
     if (playerNames.length !== 2) {
       throw new Error(`Expected 2 player names, found ${playerNames.length}`);
     }
 
-    // Get statistics
-    const stats = await page.evaluate(() => {
-      const iframe = document.querySelector("#stats_frame") as HTMLIFrameElement;
+    // Get statistics - use Function constructor to avoid TypeScript transpilation
+    const stats = await page.evaluate(new Function(`
+      const iframe = document.querySelector("#stats_frame");
       if (!iframe || !iframe.contentDocument) return {};
-
       const doc = iframe.contentDocument;
-      const getValue = (selector: string): string => {
+      
+      const getValue = (selector) => {
         const el = doc.querySelector(selector);
-        return el?.textContent?.trim() || "";
+        if (!el || !el.textContent) return "";
+        return el.textContent.trim();
       };
 
       return {
@@ -1046,7 +1050,7 @@ export async function scrapeMatchPlayerResults(
         p2_worst: getValue("#p2_worst"),
         p2_checkout: getValue(".detail.checkout .right"),
       };
-    });
+    `) as any);
 
     const results: NakkaMatchPlayerResultScrapedDTO[] = [];
 
