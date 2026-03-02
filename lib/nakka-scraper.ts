@@ -40,7 +40,7 @@ async function scrapeTournamentDateFromResults(
 ): Promise<Date | null> {
   try {
     // First try: Call the history API directly to get match data
-    const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${tournamentId}&skip=0&count=30&name=`;
+    const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${tournamentId}&skip=0&count=1&name=`;
     
     console.log(`Fetching match history from API directly`);
     
@@ -533,8 +533,8 @@ export async function scrapeTournamentsByKeyword(
 
     const tournaments: NakkaTournamentScrapedDTO[] = [];
     const now = new Date();
-    const oneYearAgo = new Date();
-    oneYearAgo.setFullYear(now.getFullYear() - 1);
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(now.getMonth() - 6);
 
     for (const item of allApiData) {
       let parsedDate: Date | null = null;
@@ -561,7 +561,7 @@ export async function scrapeTournamentsByKeyword(
         item.status === Number(NAKKA_STATUS_CODES.COMPLETED) &&
         parsedDate &&
         parsedDate < now &&
-        parsedDate >= oneYearAgo
+        parsedDate >= sixMonthsAgo
       ) {
         const href = `${NAKKA_BASE_URL}/comp.php?id=${item.tdid}`;
 
@@ -1139,3 +1139,450 @@ export async function scrapeMatchPlayerResults(
   }
 }
 
+// ============================================================================
+// LEAGUE SCRAPING FUNCTIONS
+// ============================================================================
+
+interface NakkaApiLeague {
+  lgid: string;
+  title: string;
+}
+
+interface NakkaApiLeagueEvent {
+  tdid: string;
+  title: string;
+  status: number;
+}
+
+/**
+ * Fetches leagues from the Nakka League API by keyword
+ */
+async function fetchLeaguesByKeyword(
+  keyword: string,
+  page: Page
+): Promise<NakkaApiLeague[]> {
+  try {
+    const { NAKKA_LEAGUE_API_URL } = await import("./constants.js");
+    const leagueApiUrl = `${NAKKA_LEAGUE_API_URL}?cmd=get_list&skip=0&count=30&keyword=${encodeURIComponent(keyword)}`;
+    console.log(`Fetching leagues from API: ${leagueApiUrl}`);
+    
+    const apiResponse = await page.evaluate(async (url) => {
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        return { success: true, data };
+      } catch (error) {
+        return { success: false, error: String(error) };
+      }
+    }, leagueApiUrl);
+    
+    if (apiResponse.success && Array.isArray(apiResponse.data)) {
+      console.log(`Received ${apiResponse.data.length} leagues from API`);
+      return apiResponse.data as NakkaApiLeague[];
+    } else {
+      console.log('No league data received from API');
+      return [];
+    }
+  } catch (error) {
+    console.error('Error fetching leagues from API:', error);
+    return [];
+  }
+}
+
+/**
+ * Scrapes events from a league portal page
+ */
+async function scrapeLeaguePortalForEvents(
+  lgid: string,
+  page: Page
+): Promise<NakkaApiLeagueEvent[]> {
+  try {
+    const { NAKKA_LEAGUE_BASE_URL } = await import("./constants.js");
+    const portalUrl = `${NAKKA_LEAGUE_BASE_URL}/portal.php?lgid=${lgid}`;
+    console.log(`Scraping league portal: ${portalUrl}`);
+    
+    await page.goto(portalUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+    
+    // Wait for API response or network idle
+    try {
+      await page.waitForLoadState("networkidle", { timeout: 5000 });
+    } catch (e) {
+      console.log("Network didn't go idle, continuing...");
+    }
+    
+    // Try to extract event IDs from the page
+    const events = await page.evaluate(() => {
+      const eventItems: { tdid: string; title: string; status: number }[] = [];
+      
+      // Look for tournament items (td.tournament_item)
+      const tournamentItems = document.querySelectorAll('td.tournament_item');
+      
+      if (tournamentItems.length > 0) {
+        tournamentItems.forEach(item => {
+          const link = item.querySelector('a[href*="season.php?id="]');
+          if (link) {
+            const href = link.getAttribute('href');
+            const match = href?.match(/id=([^&]+)/);
+            if (match) {
+              const tdid = match[1];
+              
+              // Extract title from .t_name div, excluding the spans
+              const titleDiv = link.querySelector('.t_name');
+              let title = 'Unknown Event';
+              if (titleDiv) {
+                // Clone the div and remove spans to get just the title text
+                const clonedDiv = titleDiv.cloneNode(true) as HTMLElement;
+                clonedDiv.querySelectorAll('span').forEach(span => span.remove());
+                title = clonedDiv.textContent?.trim() || 'Unknown Event';
+              }
+              
+              // Extract status from CSS class (e.g., "status_40" means status = 40)
+              let status = 0;
+              const statusSpan = link.querySelector('.status[class*="status_"]');
+              if (statusSpan) {
+                const classList = Array.from(statusSpan.classList);
+                for (const className of classList) {
+                  if (className.startsWith('status_')) {
+                    const statusNum = parseInt(className.replace('status_', ''), 10);
+                    if (!isNaN(statusNum)) {
+                      status = statusNum;
+                      break;
+                    }
+                  }
+                }
+              }
+              
+              eventItems.push({ 
+                tdid, 
+                title,
+                status
+              });
+            }
+          }
+        });
+      }
+      
+      // Fallback: look for table rows with event data (old structure)
+      if (eventItems.length === 0) {
+        const table = document.querySelector('#tournament_list_table tbody');
+        if (table) {
+          const rows = table.querySelectorAll('tr.t_item');
+          rows.forEach(row => {
+            const tdid = row.getAttribute('tdid');
+            const titleEl = row.querySelector('.td_title a');
+            const title = titleEl?.textContent?.trim() || 'Unknown Event';
+            
+            // Extract status from CSS class
+            let status = 0;
+            const statusSpan = row.querySelector('.status[class*="status_"]');
+            if (statusSpan) {
+              const classList = Array.from(statusSpan.classList);
+              for (const className of classList) {
+                if (className.startsWith('status_')) {
+                  const statusNum = parseInt(className.replace('status_', ''), 10);
+                  if (!isNaN(statusNum)) {
+                    status = statusNum;
+                    break;
+                  }
+                }
+              }
+            }
+            
+            if (tdid) {
+              eventItems.push({ 
+                tdid, 
+                title,
+                status
+              });
+            }
+          });
+        }
+      }
+      
+      return eventItems;
+    });
+    
+    console.log(`Found ${events.length} events in league ${lgid}`);
+    return events;
+  } catch (error) {
+    console.error(`Error scraping league portal for ${lgid}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Fetches matches from a league event/season using the History API
+ * League events use the same tournament history API endpoint
+ */
+async function scrapeLeagueEventMatches(
+  eventId: string,
+  page: Page
+): Promise<NakkaMatchScrapedDTO[]> {
+  try {
+    console.log(`Fetching matches from league event: ${eventId}`);
+    
+    const matches: NakkaMatchScrapedDTO[] = [];
+    let skip = 0;
+    const batchSize = 100;
+    let hasMore = true;
+    let totalFetched = 0;
+    const maxIterations = 20;
+    let iterations = 0;
+    
+    // Use the TOURNAMENT History API - league events use the same API structure
+    while (hasMore && iterations < maxIterations) {
+      iterations++;
+      const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${eventId}&skip=${skip}&count=${batchSize}&name=`;
+      
+      console.log(`[League Event ${eventId}] Fetching batch ${iterations} from: ${historyApiUrl}`);
+      
+      const apiResponse = await page.evaluate(async (url) => {
+        try {
+          const res = await fetch(url);
+          const data = await res.json();
+          return { success: true, data };
+        } catch (error) {
+          return { success: false, error: String(error) };
+        }
+      }, historyApiUrl);
+      
+      if (apiResponse.success && apiResponse.data?.list && Array.isArray(apiResponse.data.list)) {
+        const matchesData = apiResponse.data.list as NakkaApiMatchHistory[];
+        console.log(`Batch ${iterations}: Received ${matchesData.length} matches from event ${eventId} (skip: ${skip})`);
+        totalFetched += matchesData.length;
+        
+        for (const match of matchesData) {
+          if (match.tmid && match.p1tpid && match.p2tpid) {
+            let matchDate: Date | null = null;
+            if (match.startTime && match.startTime > 0) {
+              matchDate = new Date(match.startTime * 1000);
+            }
+            
+            // Use league view URL for league matches
+            const href = `https://n01darts.com/n01/league/n01_view.html?tmid=${match.tmid}`;
+            
+            matches.push({
+              nakka_match_identifier: match.tmid,
+              match_type: match.title || "league",
+              first_player_name: match.p1name || "Unknown",
+              first_player_code: match.p1tpid,
+              second_player_name: match.p2name || "Unknown",
+              second_player_code: match.p2tpid,
+              href,
+              match_date: matchDate,
+            });
+          }
+        }
+        
+        if (matchesData.length < batchSize) {
+          hasMore = false;
+          console.log(`Last batch received for event ${eventId} (${matchesData.length} < ${batchSize})`);
+        } else {
+          skip += batchSize;
+        }
+      } else {
+        console.log(`No match data received from History API for event ${eventId}`);
+        hasMore = false;
+      }
+    }
+    
+    if (iterations >= maxIterations) {
+      console.warn(`⚠️  Reached maximum iteration limit for event ${eventId}`);
+    }
+    
+    console.log(`✅ Total matches fetched from event ${eventId}: ${matches.length}`);
+    return matches;
+  } catch (error) {
+    console.error(`Error fetching matches from event ${eventId}:`, error);
+    return [];
+  }
+}
+
+/**
+ * Main function: Scrapes leagues by keyword and synchronizes matches <= 6 months old
+ */
+export async function scrapeLeaguesByKeyword(
+  keyword: string,
+  retryCount = 0
+): Promise<{
+  leagues: import("./types.js").NakkaLeagueScrapedDTO[];
+}> {
+  console.log("Launching Chromium browser for league scraping...");
+
+  // Detect if running on Vercel/Lambda or local
+  const isProduction = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+
+  let browser;
+  if (isProduction) {
+    const executablePath = await chromiumPkg.executablePath();
+    console.log("Executable path:", executablePath);
+    browser = await chromium.launch({
+      args: [
+        ...chromiumPkg.args,
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
+        "--disable-setuid-sandbox",
+        "--no-sandbox",
+        "--no-zygote",
+        "--disable-web-security",
+        "--disable-features=IsolateOrigins,site-per-process",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-software-rasterizer",
+        "--disable-extensions",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
+        "--disable-ipc-flooding-protection",
+        "--disable-renderer-backgrounding",
+        "--enable-features=NetworkService,NetworkServiceInProcess",
+        "--force-color-profile=srgb",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--disable-accelerated-2d-canvas",
+        "--disable-canvas-aa",
+        "--disable-2d-canvas-clip-aa",
+        "--js-flags=--max-old-space-size=512",
+        "--max_old_space_size=512",
+      ],
+      executablePath,
+      headless: true,
+      timeout: 30000,
+    });
+  } else {
+    browser = await chromium.launch({
+      headless: true,
+      args: [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-dev-shm-usage",
+      ],
+    });
+  }
+
+  try {
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      viewport: { width: 800, height: 600 },
+      locale: "en-US",
+      timezoneId: "Europe/Warsaw",
+    });
+
+    const page = await context.newPage();
+    
+    // Disable caching and block unnecessary resources
+    await page.setExtraHTTPHeaders({
+      'Cache-Control': 'no-cache',
+    });
+    
+    await page.route("**/*", (route) => {
+      const request = route.request();
+      const resourceType = request.resourceType();
+      const url = request.url();
+      
+      if (["image", "font", "media", "stylesheet", "websocket", "manifest", "other"].includes(resourceType)) {
+        route.abort();
+      } else if (resourceType === "script" && !url.includes("n01")) {
+        route.abort();
+      } else {
+        route.continue();
+      }
+    });
+
+    // Step 1: Fetch leagues by keyword
+    // Need to navigate to a page first to use page.evaluate
+    await page.goto('https://n01darts.com', { waitUntil: "domcontentloaded", timeout: 30000 });
+    const apiLeagues = await fetchLeaguesByKeyword(keyword, page);
+    
+    if (apiLeagues.length === 0) {
+      console.log("No leagues found for keyword:", keyword);
+      return { leagues: [] };
+    }
+
+    // Step 2: Build league DTOs with dynamic import
+    const { NAKKA_LEAGUE_BASE_URL } = await import("./constants.js");
+    const leagues: import("./types.js").NakkaLeagueScrapedDTO[] = apiLeagues.map(league => ({
+      lgid: league.lgid,
+      league_name: league.title || "Unknown League",
+      portal_href: `${NAKKA_LEAGUE_BASE_URL}/portal.php?lgid=${league.lgid}`,
+      events: [], // Initialize empty events array
+    }));
+
+    console.log(`Processing ${leagues.length} leagues...`);
+
+    // Step 3: Scrape events from each league portal and nest them (filter by completed status and date)
+    const now = new Date();
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(now.getMonth() - 6);
+    
+    let totalFilteredEvents = 0;
+    for (const league of leagues) {
+      const events = await scrapeLeaguePortalForEvents(league.lgid, page);
+      
+      console.log(`League ${league.lgid}: Found ${events.length} events`);
+      
+      for (const event of events) {
+        // Only include completed events (similar to tournament filtering)
+        if (event.status === Number(NAKKA_STATUS_CODES.COMPLETED)) {
+          // Get date for completed event (same as tournaments)
+          console.log(`Event ${event.tdid} is completed, fetching date from Results tab...`);
+          let eventDate: Date | null = null;
+          
+          try {
+            eventDate = await scrapeTournamentDateFromResults(event.tdid, page);
+          } catch (error) {
+            console.error(`Failed to scrape date for event ${event.tdid}:`, error);
+            // Skip this event if we can't get a date
+            continue;
+          }
+          
+          // Only add event if we got a valid date and it's within the last 6 months
+          if (eventDate && eventDate >= sixMonthsAgo) {
+            league.events.push({
+              event_id: event.tdid,
+              event_name: event.title,
+              event_href: `${NAKKA_LEAGUE_BASE_URL}/season.php?id=${event.tdid}`,
+              league_id: league.lgid,
+              event_status: "completed",
+              event_date: eventDate,
+            });
+            totalFilteredEvents++;
+          } else if (!eventDate) {
+            console.log(`Skipping event ${event.tdid} - no valid date found`);
+          } else {
+            console.log(`Skipping event ${event.tdid} - date ${eventDate.toISOString()} outside 6-month range`);
+          }
+        } else {
+          console.log(`Skipping event ${event.tdid} - status: ${event.status} (not completed)`);
+        }
+      }
+    }
+
+    console.log(`✅ Final results: ${leagues.length} leagues, ${totalFilteredEvents} completed events`);
+
+    return {
+      leagues,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
+                           errorMessage.includes("ERR_OUT_OF_MEMORY");
+    
+    if (isResourceError && retryCount < 2) {
+      console.warn(`Memory error detected, retrying (${retryCount + 1}/2)...`);
+      await browser.close().catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      return scrapeLeaguesByKeyword(keyword, retryCount + 1);
+    }
+    
+    throw error;
+  } finally {
+    if (browser && browser.isConnected()) {
+      await browser.close().catch(() => {});
+    }
+  }
+}

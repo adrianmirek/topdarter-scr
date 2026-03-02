@@ -33,3 +33,19 @@ export interface NakkaMatchPlayerResultScrapedDTO {
   opponent_score: number;
 }
 
+export interface NakkaLeagueScrapedDTO {
+  lgid: string;
+  league_name: string;
+  portal_href: string;
+  events: NakkaLeagueEventScrapedDTO[];
+}
+
+export interface NakkaLeagueEventScrapedDTO {
+  event_id: string;
+  event_name: string;
+  event_href: string;
+  league_id: string;
+  event_status: string;
+  event_date: Date;
+}
+
