@@ -5,6 +5,8 @@ import type {
   NakkaTournamentScrapedDTO,
   NakkaMatchScrapedDTO,
   NakkaMatchPlayerResultScrapedDTO,
+  NakkaPlayerStatsDTO,
+  NakkaTournamentStatsDTO,
 } from "./types.js";
 import { NAKKA_BASE_URL, NAKKA_STATUS_CODES } from "./constants.js";
 
@@ -1585,4 +1587,65 @@ export async function scrapeLeaguesByKeyword(
       await browser.close().catch(() => {});
     }
   }
+}
+
+
+interface NakkaApiPlayerStats {
+  score: number;
+  darts: number;
+  winLeg: number;
+  leg: number;
+  winMatch: number;
+  match: number;
+  ton00: number;
+  ton40: number;
+  ton70: number;
+  ton80: number;
+  highOut: number;
+  best: number;
+  f9Score: number;
+  f9Darts: number;
+  rank: number;
+  rank_d?: number;
+  [key: string]: unknown;
+}
+
+export async function scrapeTournamentStats(tournamentId: string): Promise<NakkaTournamentStatsDTO> {
+  const url = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_stats_t.php?cmd=stats_list&tdid=${tournamentId}`;
+
+  console.log(`[scrapeTournamentStats] Fetching stats for tournament: ${tournamentId}`);
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch tournament stats: ${response.status} ${response.statusText}`);
+  }
+
+  const raw = (await response.json()) as Record<string, NakkaApiPlayerStats>;
+
+  const round2 = (value: number): number => Math.round(value * 100) / 100;
+
+  const players_stats: NakkaPlayerStatsDTO[] = Object.entries(raw).map(([playerId, s]) => ({
+    player_id: playerId,
+    rank: s.rank === 0 && s.rank_d ? s.rank_d : s.rank,
+    score_100_count: s.ton00,
+    score_140_count: s.ton40,
+    score_170_count: s.ton70,
+    score_180_count: s.ton80,
+    high_finish: s.highOut,
+    best_leg: s.best,
+    average_score: s.darts > 0 ? round2(s.score / (s.darts / 3)) : 0,
+    first_nine_avg: s.f9Darts > 0 ? round2(s.f9Score / (s.f9Darts / 3)) : 0,
+    win_rate: s.match > 0 ? round2((s.winMatch * 100) / s.match) : 0,
+    leg_rate: s.leg > 0 ? round2((s.winLeg * 100) / s.leg) : 0,
+    matches_count: s.match,
+    legs_count: s.leg,
+  }));
+
+  console.log(`[scrapeTournamentStats] Processed ${players_stats.length} player(s) for tournament ${tournamentId}`);
+
+  return {
+    tournament_id: tournamentId,
+    players_stats,
+  };
 }
