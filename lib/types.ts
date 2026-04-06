@@ -33,6 +33,28 @@ export interface NakkaMatchPlayerResultScrapedDTO {
   opponent_score: number;
 }
 
+export interface NakkaPlayerStatsDTO {
+  player_id: string;
+  rank: number;
+  score_100_count: number;
+  score_140_count: number;
+  score_170_count: number;
+  score_180_count: number;
+  high_finish: number;
+  best_leg: number;
+  average_score: number;
+  first_nine_avg: number;
+  win_rate: number;
+  leg_rate: number;
+  matches_count: number;
+  legs_count: number;
+}
+
+export interface NakkaTournamentStatsDTO {
+  tournament_id: string;
+  players_stats: NakkaPlayerStatsDTO[];
+}
+
 export interface NakkaLeagueScrapedDTO {
   lgid: string;
   league_name: string;
