@@ -1,4 +1,4 @@
-import { chromium } from "playwright-core";
+﻿import { chromium } from "playwright-core";
 import chromiumPkg from "@sparticuz/chromium";
 import type { Page } from "playwright-core";
 import type {
@@ -9,6 +9,7 @@ import type {
   NakkaTournamentStatsDTO,
 } from "./types.js";
 import { NAKKA_BASE_URL, NAKKA_STATUS_CODES } from "./constants.js";
+import { extractMatchIdentifierComponents } from "./match-identifier.js";
 
 interface NakkaApiTournament {
   tdid: string;
@@ -384,10 +385,10 @@ async function fetchMatchDatesFromHistoryApi(
     }
     
     if (iterations >= maxIterations) {
-      console.warn(`⚠️  Reached maximum iteration limit (${maxIterations} batches). Some matches may not have dates.`);
+      console.warn(`âš ï¸  Reached maximum iteration limit (${maxIterations} batches). Some matches may not have dates.`);
     }
     
-    console.log(`✅ Fetched ${totalFetched} total matches from API, mapped dates for ${matchDateMap.size} matches`);
+    console.log(`âœ… Fetched ${totalFetched} total matches from API, mapped dates for ${matchDateMap.size} matches`);
   } catch (error) {
     console.error('Error fetching match dates from History API:', error);
   }
@@ -748,11 +749,11 @@ export async function scrapeTournamentMatches(
     }
     
     if (iterations >= maxIterations) {
-      console.warn(`⚠️  Reached maximum iteration limit (${maxIterations} batches). Some matches may not be fetched.`);
+      console.warn(`âš ï¸  Reached maximum iteration limit (${maxIterations} batches). Some matches may not be fetched.`);
     }
     
     const matchesWithDates = matches.filter(m => m.match_date).length;
-    console.log(`✅ Total matches fetched: ${matches.length}`);
+    console.log(`âœ… Total matches fetched: ${matches.length}`);
     console.log(`Matches with dates: ${matchesWithDates}/${matches.length}`);
 
     return matches;
@@ -800,29 +801,6 @@ function parseIntValue(text: string | null | undefined): number {
 /**
  * Extracts match identifier components
  */
-function extractMatchIdentifierComponents(nakkaMatchIdentifier: string): {
-  tournamentId: string;
-  matchType: string;
-  round: string;
-} | null {
-  const parts = nakkaMatchIdentifier.split("_");
-
-  if (parts.length < 5) {
-    console.error(`Invalid match identifier format: ${nakkaMatchIdentifier}`);
-    return null;
-  }
-
-  const tournamentId = parts.slice(0, 3).join("_");
-  const matchType = parts[3];
-  const round = parts[4];
-
-  return {
-    tournamentId,
-    matchType,
-    round
-  };
-}
-
 /**
  * Scrapes player results from a match page
  */
@@ -1393,10 +1371,10 @@ async function scrapeLeagueEventMatches(
     }
     
     if (iterations >= maxIterations) {
-      console.warn(`⚠️  Reached maximum iteration limit for event ${eventId}`);
+      console.warn(`âš ï¸  Reached maximum iteration limit for event ${eventId}`);
     }
     
-    console.log(`✅ Total matches fetched from event ${eventId}: ${matches.length}`);
+    console.log(`âœ… Total matches fetched from event ${eventId}: ${matches.length}`);
     return matches;
   } catch (error) {
     console.error(`Error fetching matches from event ${eventId}:`, error);
@@ -1568,7 +1546,7 @@ export async function scrapeLeaguesByKeyword(
       }
     }
 
-    console.log(`✅ Final results: ${leagues.length} leagues, ${totalFilteredEvents} completed events`);
+    console.log(`âœ… Final results: ${leagues.length} leagues, ${totalFilteredEvents} completed events`);
 
     return {
       leagues,
