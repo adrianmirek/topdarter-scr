@@ -2,7 +2,6 @@
 import chromiumPkg from "@sparticuz/chromium";
 import type { Page } from "playwright-core";
 import type {
-  NakkaTournamentScrapedDTO,
   NakkaMatchScrapedDTO,
   NakkaMatchPlayerResultScrapedDTO,
   NakkaPlayerStatsDTO,
@@ -10,14 +9,9 @@ import type {
 } from "./types.js";
 import { NAKKA_BASE_URL, NAKKA_STATUS_CODES } from "./constants.js";
 import { extractMatchIdentifierComponents } from "./match-identifier.js";
+import { fetchTournamentDateFromHistoryApi } from "./nakka-api-tournaments.js";
 
-interface NakkaApiTournament {
-  tdid: string;
-  title: string;
-  status: number;
-  t_date: number;
-  createTime?: number;
-}
+export { scrapeTournamentsByKeyword } from "./nakka-api-tournaments.js";
 
 interface NakkaApiMatchHistory {
   tmid: string;
@@ -42,50 +36,9 @@ async function scrapeTournamentDateFromResults(
   existingPage: Page
 ): Promise<Date | null> {
   try {
-    // First try: Call the history API directly to get match data
-    const historyApiUrl = `https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_history.php?cmd=get_t_list&tdid=${tournamentId}&skip=0&count=1&name=`;
-    
-    console.log(`Fetching match history from API directly`);
-    
-    const apiResponse = await existingPage.evaluate(async (url) => {
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-        return { success: true, data, dataType: Array.isArray(data) ? 'array' : typeof data, length: Array.isArray(data) ? data.length : 0 };
-      } catch (error) {
-        return { success: false, error: String(error) };
-      }
-    }, historyApiUrl);
-    
-    console.log('API Response:', JSON.stringify(apiResponse, null, 2).substring(0, 500));
-    
-    if (apiResponse.success && apiResponse.data && apiResponse.data.list && Array.isArray(apiResponse.data.list) && apiResponse.data.list.length > 0) {
-      console.log(`Received ${apiResponse.data.list.length} matches from history API`);
-      
-      // Look for the first match with a date
-      for (const match of apiResponse.data.list) {
-        if (match.startTime && match.startTime > 0) {
-          // startTime is a Unix timestamp
-          const matchDate = new Date(match.startTime * 1000);
-          
-          // Subtract 4 hours to account for finals being played later/next day
-          matchDate.setHours(matchDate.getHours() - 4);
-          
-          // Strip time component - keep only the date at midnight UTC
-          const parsedDate = new Date(Date.UTC(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate(), 0, 0, 0, 0));
-          
-          if (!isNaN(parsedDate.getTime())) {
-            console.log(`Scraped date ${parsedDate.toISOString()} from match history API for tournament ${tournamentId} (adjusted -4 hours, time stripped)`);
-            return parsedDate;
-          }
-        }
-      }
-      
-      console.log('Match data received but no valid dates found');
-    } else {
-      const hasList = apiResponse.data && apiResponse.data.list;
-      const listLength = hasList && Array.isArray(apiResponse.data.list) ? apiResponse.data.list.length : 0;
-      console.log(`No match data from history API (success: ${apiResponse.success}, hasList: ${!!hasList}, listLength: ${listLength})`);
+    const parsedDate = await fetchTournamentDateFromHistoryApi(tournamentId);
+    if (parsedDate) {
+      return parsedDate;
     }
   } catch (apiError) {
     console.log('API call failed:', apiError);
@@ -394,211 +347,6 @@ async function fetchMatchDatesFromHistoryApi(
   }
   
   return matchDateMap;
-}
-
-/**
- * Scrapes tournaments from Nakka by keyword using Playwright with stealth
- */
-export async function scrapeTournamentsByKeyword(
-  keyword: string,
-  retryCount = 0
-): Promise<NakkaTournamentScrapedDTO[]> {
-  const url = `${NAKKA_BASE_URL}/?keyword=${encodeURIComponent(keyword)}`;
-  console.log("Launching Chromium browser...");
-  console.log("Target URL:", url);
-
-  // Detect if running on Vercel/Lambda or local
-  const isProduction = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
-
-  let browser;
-  if (isProduction) {
-    // Use @sparticuz/chromium for serverless environments
-    const executablePath = await chromiumPkg.executablePath();
-    console.log("Executable path:", executablePath);
-    browser = await chromium.launch({
-      args: [
-        ...chromiumPkg.args,
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        "--disable-setuid-sandbox",
-        "--no-sandbox",
-        "--no-zygote",
-        "--disable-web-security",
-        "--disable-features=IsolateOrigins,site-per-process",
-        "--disable-blink-features=AutomationControlled",
-        // Memory saving flags
-        "--disable-software-rasterizer",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--disable-background-timer-throttling",
-        "--disable-backgrounding-occluded-windows",
-        "--disable-breakpad",
-        "--disable-component-extensions-with-background-pages",
-        "--disable-features=TranslateUI,BlinkGenPropertyTrees",
-        "--disable-ipc-flooding-protection",
-        "--disable-renderer-backgrounding",
-        "--enable-features=NetworkService,NetworkServiceInProcess",
-        "--force-color-profile=srgb",
-        "--hide-scrollbars",
-        "--mute-audio",
-        "--disable-accelerated-2d-canvas",
-        "--disable-canvas-aa",
-        "--disable-2d-canvas-clip-aa",
-        // Aggressive memory limits for serverless
-        "--js-flags=--max-old-space-size=512",
-        "--max_old_space_size=512",
-      ],
-      executablePath,
-      headless: true,
-      timeout: 30000,
-    });
-  } else {
-    // Use local Chromium for development
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-dev-shm-usage",
-      ],
-    });
-  }
-
-  try {
-    const context = await browser.newContext({
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      viewport: { width: 800, height: 600 }, // Reduced viewport to save memory
-      locale: "en-US",
-      timezoneId: "Europe/Warsaw",
-    });
-
-    const page = await context.newPage();
-    
-    // Disable caching to save memory
-    await page.setExtraHTTPHeaders({
-      'Cache-Control': 'no-cache',
-    });
-    
-    // Aggressive resource blocking to minimize memory usage
-    await page.route("**/*", (route) => {
-      const request = route.request();
-      const resourceType = request.resourceType();
-      const url = request.url();
-      
-      // Block everything except essential resources
-      if (["image", "font", "media", "stylesheet", "websocket", "manifest", "other"].includes(resourceType)) {
-        route.abort();
-      } else if (resourceType === "script" && !url.includes("n01")) {
-        // Block third-party scripts (analytics, ads, etc.) to save memory
-        route.abort();
-      } else {
-        route.continue();
-      }
-    });
-    const allApiData: NakkaApiTournament[] = [];
-
-    // Intercept API responses
-    page.on("response", async (response) => {
-      const responseUrl = response.url();
-      if (
-        responseUrl.includes("n01_tournament.php") &&
-        responseUrl.includes("cmd=get_list")
-      ) {
-        try {
-          const data = (await response.json()) as NakkaApiTournament[];
-          if (data && Array.isArray(data)) {
-            allApiData.push(...data);
-          }
-        } catch (error) {
-          console.error("Failed to parse API response:", error);
-        }
-      }
-    });
-
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
-    
-    // Wait for API response or network idle instead of arbitrary timeout
-    try {
-      await page.waitForLoadState("networkidle", { timeout: 5000 });
-    } catch (e) {
-      // If network doesn't go idle in 5 seconds, continue anyway
-      console.log("Network didn't go idle, continuing...");
-    }
-
-    console.log(`Collected: ${allApiData.length} tournaments`);
-
-    if (allApiData.length === 0) {
-      console.error("No tournament data intercepted from API");
-      return [];
-    }
-
-    const tournaments: NakkaTournamentScrapedDTO[] = [];
-    const now = new Date();
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(now.getMonth() - 6);
-
-    for (const item of allApiData) {
-      let parsedDate: Date | null = null;
-      
-      // First, try to get date from API
-      //if (item.t_date && item.t_date > 0) {
-      //  parsedDate = new Date(item.t_date * 1000);
-      //}
-      
-      // If no date from API and tournament is completed, scrape from Results tab
-      if (!parsedDate && item.tdid && item.status === Number(NAKKA_STATUS_CODES.COMPLETED)) {
-        console.log(`No API date for tournament ${item.tdid}, fetching from Results tab...`);
-        try {
-          parsedDate = await scrapeTournamentDateFromResults(item.tdid, page);
-        } catch (error) {
-          console.error(`Failed to scrape date for tournament ${item.tdid}:`, error);
-          // Skip this tournament if we can't get a date
-          continue;
-        }
-      }
-
-      if (
-        item.tdid &&
-        item.status === Number(NAKKA_STATUS_CODES.COMPLETED) &&
-        parsedDate &&
-        parsedDate < now &&
-        parsedDate >= sixMonthsAgo
-      ) {
-        const href = `${NAKKA_BASE_URL}/comp.php?id=${item.tdid}`;
-
-        tournaments.push({
-          nakka_identifier: item.tdid,
-          tournament_name: item.title || "Unknown Tournament",
-          href,
-          tournament_date: parsedDate,
-          status: "completed",
-        });
-      }
-    }
-
-    console.log(`Filtered to ${tournaments.length} completed tournaments`);
-    return tournaments;
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const isResourceError = errorMessage.includes("ERR_INSUFFICIENT_RESOURCES") || 
-                           errorMessage.includes("ERR_OUT_OF_MEMORY");
-    
-    if (isResourceError && retryCount < 2) {
-      console.warn(`Memory error detected, retrying (${retryCount + 1}/2)...`);
-      await browser.close().catch(() => {});
-      // Wait a bit to let Lambda clean up
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      return scrapeTournamentsByKeyword(keyword, retryCount + 1);
-    }
-    
-    throw error;
-  } finally {
-    if (browser && browser.isConnected()) {
-      await browser.close().catch(() => {});
-    }
-  }
 }
 
 /**
