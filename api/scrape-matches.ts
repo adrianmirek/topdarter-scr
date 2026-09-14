@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { scrapeTournamentMatches } from "../lib/nakka-scraper.js";
+import { scrapeTournamentMatches } from "../lib/nakka-api-matches.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Credentials": "true",
