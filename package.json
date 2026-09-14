@@ -18,7 +18,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@sparticuz/chromium": "^143.0.4",
     "@vercel/node": "^3.0.21",
     "playwright-core": "^1.49.0",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
