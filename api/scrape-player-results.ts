@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { scrapeMatchPlayerResults } from "../lib/nakka-scraper.js";
+import { fetchMatchPlayerResultsFromApi } from "../lib/nakka-api-player-results.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Credentials": "true",
@@ -26,18 +26,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode } = req.body;
+    const { nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode } = req.body;
 
-    if (!matchHref || !nakkaMatchIdentifier || !firstPlayerCode || !secondPlayerCode) {
+    if (!nakkaMatchIdentifier || !firstPlayerCode || !secondPlayerCode) {
       return res.status(400).json({
         success: false,
-        error: "Missing required parameters: matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode",
+        error:
+          "Missing required parameters: nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode",
       });
     }
 
     console.log(`[API] Scraping player results for match: ${nakkaMatchIdentifier}`);
 
-    const playerResults = await scrapeMatchPlayerResults(matchHref, nakkaMatchIdentifier, firstPlayerCode, secondPlayerCode);
+    const playerResults = await fetchMatchPlayerResultsFromApi(
+      nakkaMatchIdentifier,
+      firstPlayerCode,
+      secondPlayerCode
+    );
 
     console.log(`[API] Successfully scraped ${playerResults.length} player results`);
 
@@ -54,4 +59,3 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   }
 }
-
