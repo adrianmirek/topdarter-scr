@@ -3,6 +3,7 @@
  */
 
 import {
+  is501FromFirstLegFirstPlayer,
   isTournamentListPayload,
   parseTournamentDateFromHistoryStartTime,
   shouldKeepCompletedTournament,
@@ -121,11 +122,30 @@ describe("shouldKeepCompletedTournament", () => {
   const sixMonthsAgo = new Date(now);
   sixMonthsAgo.setMonth(now.getMonth() - 6);
 
-  test("should keep a completed tournament inside the last 6 months", () => {
+  test("should keep a completed 501 tournament inside the last 6 months", () => {
     const parsedDate = new Date("2026-08-20T00:00:00.000Z");
     expect(
-      shouldKeepCompletedTournament(sampleCompleted, parsedDate, now, sixMonthsAgo)
+      shouldKeepCompletedTournament(
+        sampleCompleted,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        true
+      )
     ).toBe(true);
+  });
+
+  test("should drop a non-501 tournament even when date and status would keep", () => {
+    const parsedDate = new Date("2026-08-20T00:00:00.000Z");
+    expect(
+      shouldKeepCompletedTournament(
+        sampleCompleted,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        false
+      )
+    ).toBe(false);
   });
 
   test("should drop status other than 40", () => {
@@ -135,7 +155,8 @@ describe("shouldKeepCompletedTournament", () => {
         { ...sampleCompleted, status: 30 },
         parsedDate,
         now,
-        sixMonthsAgo
+        sixMonthsAgo,
+        true
       )
     ).toBe(false);
   });
@@ -147,28 +168,124 @@ describe("shouldKeepCompletedTournament", () => {
         { ...sampleCompleted, tdid: "" },
         parsedDate,
         now,
-        sixMonthsAgo
+        sixMonthsAgo,
+        true
       )
     ).toBe(false);
   });
 
   test("should drop a missing history date", () => {
     expect(
-      shouldKeepCompletedTournament(sampleCompleted, null, now, sixMonthsAgo)
+      shouldKeepCompletedTournament(sampleCompleted, null, now, sixMonthsAgo, true)
     ).toBe(false);
   });
 
   test("should drop a future history date", () => {
     const parsedDate = new Date("2026-10-01T00:00:00.000Z");
     expect(
-      shouldKeepCompletedTournament(sampleCompleted, parsedDate, now, sixMonthsAgo)
+      shouldKeepCompletedTournament(
+        sampleCompleted,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        true
+      )
     ).toBe(false);
   });
 
   test("should drop a date older than 6 months", () => {
     const parsedDate = new Date("2026-02-01T00:00:00.000Z");
     expect(
-      shouldKeepCompletedTournament(sampleCompleted, parsedDate, now, sixMonthsAgo)
+      shouldKeepCompletedTournament(
+        sampleCompleted,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        true
+      )
     ).toBe(false);
+  });
+});
+
+describe("is501FromFirstLegFirstPlayer", () => {
+  test("should keep when first dart left is 501", () => {
+    expect(
+      is501FromFirstLegFirstPlayer({
+        legData: [
+          {
+            playerData: [[{ score: 0, left: 501 }]],
+          },
+        ],
+      })
+    ).toBe(true);
+  });
+
+  test("should skip when first dart left is 301", () => {
+    expect(
+      is501FromFirstLegFirstPlayer({
+        legData: [
+          {
+            playerData: [[{ score: 0, left: 301 }]],
+          },
+        ],
+      })
+    ).toBe(false);
+  });
+
+  test("should skip when first dart left is 701", () => {
+    expect(
+      is501FromFirstLegFirstPlayer({
+        legData: [
+          {
+            playerData: [[{ score: 0, left: 701 }]],
+          },
+        ],
+      })
+    ).toBe(false);
+  });
+
+  test("should skip when later legs are 501 but the first dart is not", () => {
+    expect(
+      is501FromFirstLegFirstPlayer({
+        legData: [
+          {
+            playerData: [[{ score: 0, left: 301 }]],
+          },
+          {
+            playerData: [[{ score: 0, left: 501 }]],
+          },
+        ],
+      })
+    ).toBe(false);
+  });
+
+  test("should skip missing legData", () => {
+    expect(is501FromFirstLegFirstPlayer({})).toBe(false);
+    expect(is501FromFirstLegFirstPlayer(null)).toBe(false);
+    expect(is501FromFirstLegFirstPlayer(undefined)).toBe(false);
+  });
+
+  test("should skip empty playerData or missing first dart", () => {
+    expect(
+      is501FromFirstLegFirstPlayer({
+        legData: [{ playerData: [] }],
+      })
+    ).toBe(false);
+    expect(
+      is501FromFirstLegFirstPlayer({
+        legData: [{ playerData: [[]] }],
+      })
+    ).toBe(false);
+  });
+
+  test("should accept a history list item with tmid", () => {
+    const historyList: Array<{ tmid?: string; startTime?: number }> = [
+      {
+        tmid: "t_Bhce_5464_rr_0_2F7T_XOGp",
+        startTime: 1772132718,
+      },
+    ];
+
+    expect(historyList[0].tmid).toBe("t_Bhce_5464_rr_0_2F7T_XOGp");
   });
 });

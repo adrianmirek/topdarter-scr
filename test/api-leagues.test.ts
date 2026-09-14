@@ -126,11 +126,30 @@ describe("shouldKeepCompletedLeagueEvent", () => {
   const sixMonthsAgo = new Date(now);
   sixMonthsAgo.setMonth(now.getMonth() - 6);
 
-  test("should keep a completed event inside the last 6 months", () => {
+  test("should keep a completed 501 event inside the last 6 months", () => {
     const parsedDate = new Date("2026-09-08T00:00:00.000Z");
     expect(
-      shouldKeepCompletedLeagueEvent(sampleSeason, parsedDate, sixMonthsAgo)
+      shouldKeepCompletedLeagueEvent(
+        sampleSeason,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        true
+      )
     ).toBe(true);
+  });
+
+  test("should drop a non-501 event even when date and status would keep", () => {
+    const parsedDate = new Date("2026-09-08T00:00:00.000Z");
+    expect(
+      shouldKeepCompletedLeagueEvent(
+        sampleSeason,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        false
+      )
+    ).toBe(false);
   });
 
   test("should drop status other than 40", () => {
@@ -139,7 +158,9 @@ describe("shouldKeepCompletedLeagueEvent", () => {
       shouldKeepCompletedLeagueEvent(
         { ...sampleSeason, status: 30 },
         parsedDate,
-        sixMonthsAgo
+        now,
+        sixMonthsAgo,
+        true
       )
     ).toBe(false);
   });
@@ -150,21 +171,42 @@ describe("shouldKeepCompletedLeagueEvent", () => {
       shouldKeepCompletedLeagueEvent(
         { ...sampleSeason, tdid: "" },
         parsedDate,
-        sixMonthsAgo
+        now,
+        sixMonthsAgo,
+        true
       )
     ).toBe(false);
   });
 
   test("should drop a missing history date", () => {
     expect(
-      shouldKeepCompletedLeagueEvent(sampleSeason, null, sixMonthsAgo)
+      shouldKeepCompletedLeagueEvent(sampleSeason, null, now, sixMonthsAgo, true)
+    ).toBe(false);
+  });
+
+  test("should drop a future history date", () => {
+    const parsedDate = new Date("2026-10-01T00:00:00.000Z");
+    expect(
+      shouldKeepCompletedLeagueEvent(
+        sampleSeason,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        true
+      )
     ).toBe(false);
   });
 
   test("should drop a date older than 6 months", () => {
     const parsedDate = new Date("2026-02-01T00:00:00.000Z");
     expect(
-      shouldKeepCompletedLeagueEvent(sampleSeason, parsedDate, sixMonthsAgo)
+      shouldKeepCompletedLeagueEvent(
+        sampleSeason,
+        parsedDate,
+        now,
+        sixMonthsAgo,
+        true
+      )
     ).toBe(false);
   });
 });

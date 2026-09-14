@@ -1,8 +1,10 @@
 import type { NakkaTournamentScrapedDTO } from "./types.js";
 import { httpsJsonRequest } from "./https-json.js";
+import { fetchMatchViewFromApi } from "./nakka-api-player-results.js";
 import {
   NAKKA_BASE_URL,
   NAKKA_HISTORY_API_URL,
+  NAKKA_START_SCORE_501,
   NAKKA_STATUS_CODES,
   NAKKA_TOURNAMENT_API_URL,
 } from "./constants.js";
@@ -21,7 +23,39 @@ export interface NakkaApiTournamentListItem {
 }
 
 interface NakkaHistoryListResponse {
-  list?: Array<{ startTime?: number }>;
+  list?: Array<{
+    tmid?: string;
+    startTime?: number;
+  }>;
+}
+
+export interface TournamentHistoryProbe {
+  parsedDate: Date | null;
+  is501: boolean;
+}
+
+export function is501FromFirstLegFirstPlayer(match: {
+  legData?: Array<{
+    playerData?: Array<Array<{ score?: number; left?: number }>>;
+  }>;
+} | null | undefined): boolean {
+  const left = match?.legData?.[0]?.playerData?.[0]?.[0]?.left;
+  return left === NAKKA_START_SCORE_501;
+}
+
+async function fetchFirstMatchIs501(tmid: string): Promise<boolean> {
+  try {
+    const apiData = await fetchMatchViewFromApi(tmid);
+    const is501 = is501FromFirstLegFirstPlayer(apiData);
+    const left = apiData?.legData?.[0]?.playerData?.[0]?.[0]?.left;
+    console.log(
+      `[API] 501 probe for tmid=${tmid}: left=${left ?? "missing"} keep=${is501}`
+    );
+    return is501;
+  } catch (error) {
+    console.log(`[API] 501 probe failed for tmid=${tmid}:`, error);
+    return false;
+  }
 }
 
 /**
@@ -66,14 +100,16 @@ export function shouldKeepCompletedTournament(
   item: NakkaApiTournamentListItem,
   parsedDate: Date | null,
   now: Date,
-  sixMonthsAgo: Date
+  sixMonthsAgo: Date,
+  is501: boolean
 ): boolean {
   return Boolean(
     item.tdid &&
       item.status === Number(NAKKA_STATUS_CODES.COMPLETED) &&
       parsedDate &&
       parsedDate < now &&
-      parsedDate >= sixMonthsAgo
+      parsedDate >= sixMonthsAgo &&
+      is501
   );
 }
 
@@ -90,40 +126,62 @@ export function toTournamentDto(
   };
 }
 
-export async function fetchTournamentDateFromHistoryApi(
+async function fetchHistoryList(
   tournamentId: string
-): Promise<Date | null> {
+): Promise<Array<{ tmid?: string; startTime?: number }> | null> {
   const historyApiUrl = `${NAKKA_HISTORY_API_URL}?cmd=get_t_list&tdid=${encodeURIComponent(tournamentId)}&skip=0&count=1&name=`;
   console.log(`Fetching match history from API directly`);
 
+  const data = await httpsJsonRequest<NakkaHistoryListResponse>(historyApiUrl);
+  if (!data?.list || !Array.isArray(data.list) || data.list.length === 0) {
+    console.log(
+      `No match data from history API (hasList: ${Boolean(data?.list)}, listLength: ${Array.isArray(data?.list) ? data.list.length : 0})`
+    );
+    return null;
+  }
+
+  console.log(`Received ${data.list.length} matches from history API`);
+  return data.list;
+}
+
+export async function fetchTournamentDateFromHistoryApi(
+  tournamentId: string
+): Promise<TournamentHistoryProbe> {
   try {
-    const data = await httpsJsonRequest<NakkaHistoryListResponse>(historyApiUrl);
-    if (!data?.list || !Array.isArray(data.list) || data.list.length === 0) {
-      console.log(
-        `No match data from history API (hasList: ${Boolean(data?.list)}, listLength: ${Array.isArray(data?.list) ? data.list.length : 0})`
-      );
-      return null;
+    const list = await fetchHistoryList(tournamentId);
+    if (!list) {
+      return { parsedDate: null, is501: false };
     }
 
-    console.log(`Received ${data.list.length} matches from history API`);
+    for (const match of list) {
+      const parsedDate =
+        match.startTime && match.startTime > 0
+          ? parseTournamentDateFromHistoryStartTime(match.startTime)
+          : null;
 
-    for (const match of data.list) {
-      if (match.startTime && match.startTime > 0) {
-        const parsedDate = parseTournamentDateFromHistoryStartTime(match.startTime);
-        if (parsedDate) {
-          console.log(
-            `Scraped date ${parsedDate.toISOString()} from match history API for tournament ${tournamentId} (adjusted -4 hours, time stripped)`
-          );
-          return parsedDate;
-        }
+      if (parsedDate) {
+        console.log(
+          `Scraped date ${parsedDate.toISOString()} from match history API for tournament ${tournamentId} (adjusted -4 hours, time stripped)`
+        );
       }
+
+      let is501 = false;
+      if (match.tmid) {
+        is501 = await fetchFirstMatchIs501(match.tmid);
+      } else {
+        console.log(
+          `[API] Skipping 501 probe for tournament ${tournamentId}: missing tmid`
+        );
+      }
+
+      return { parsedDate, is501 };
     }
 
     console.log("Match data received but no valid dates found");
-    return null;
+    return { parsedDate: null, is501: false };
   } catch (apiError) {
     console.log("API call failed:", apiError);
-    return null;
+    return { parsedDate: null, is501: false };
   }
 }
 
@@ -185,16 +243,29 @@ export async function fetchTournamentsByKeywordFromApi(
       continue;
     }
 
-    let parsedDate: Date | null = null;
+    let probe: TournamentHistoryProbe;
     try {
-      parsedDate = await fetchTournamentDateFromHistoryApi(item.tdid);
+      probe = await fetchTournamentDateFromHistoryApi(item.tdid);
     } catch (error) {
       console.error(`Failed to scrape date for tournament ${item.tdid}:`, error);
       continue;
     }
 
-    if (shouldKeepCompletedTournament(item, parsedDate, now, sixMonthsAgo) && parsedDate) {
-      tournaments.push(toTournamentDto(item, parsedDate));
+    if (
+      shouldKeepCompletedTournament(
+        item,
+        probe.parsedDate,
+        now,
+        sixMonthsAgo,
+        probe.is501
+      ) &&
+      probe.parsedDate
+    ) {
+      tournaments.push(toTournamentDto(item, probe.parsedDate));
+    } else if (probe.parsedDate && !probe.is501) {
+      console.log(
+        `[API] Skipping tournament ${item.tdid}: first match is not 501`
+      );
     }
   }
 

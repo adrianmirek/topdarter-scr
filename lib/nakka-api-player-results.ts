@@ -1,6 +1,7 @@
 import type { NakkaMatchPlayerResultScrapedDTO } from "./types.js";
 import { extractMatchIdentifierComponents } from "./match-identifier.js";
 import { httpsJsonRequest } from "./https-json.js";
+import { NAKKA_MATCH_VIEW_API_URL } from "./constants.js";
 import {
   calculateAverageScore,
   calculateFirstNineAverage,
@@ -12,6 +13,25 @@ import {
   extractPlayerIdentifiers,
   type NakkaApiMatchResponse,
 } from "./nakka-api-calculations.js";
+
+/**
+ * Raw match_view POST used by player-results and the 501 tournament probe.
+ */
+export async function fetchMatchViewFromApi(
+  tmid: string
+): Promise<NakkaApiMatchResponse> {
+  console.log(`[API] Requesting: ${NAKKA_MATCH_VIEW_API_URL}`);
+
+  return httpsJsonRequest<NakkaApiMatchResponse>(NAKKA_MATCH_VIEW_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+    },
+    body: JSON.stringify({
+      tmid,
+    }),
+  });
+}
 
 /**
  * Fetches player match results from the Nakka API (no browser).
@@ -28,20 +48,7 @@ export async function fetchMatchPlayerResultsFromApi(
     throw new Error(`Failed to parse match identifier: ${nakkaMatchIdentifier}`);
   }
 
-  const apiUrl =
-    "https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_user_t.php?cmd=match_view&sid=";
-
-  console.log(`[API] Requesting: ${apiUrl}`);
-
-  const apiData = await httpsJsonRequest<NakkaApiMatchResponse>(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    },
-    body: JSON.stringify({
-      tmid: nakkaMatchIdentifier,
-    }),
-  });
+  const apiData = await fetchMatchViewFromApi(nakkaMatchIdentifier);
 
   if (!apiData.legData || !Array.isArray(apiData.legData)) {
     throw new Error("Invalid API response: legData is missing or not an array");

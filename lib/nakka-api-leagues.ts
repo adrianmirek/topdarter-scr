@@ -8,7 +8,10 @@ import {
   NAKKA_LEAGUE_BASE_URL,
   NAKKA_STATUS_CODES,
 } from "./constants.js";
-import { fetchTournamentDateFromHistoryApi } from "./nakka-api-tournaments.js";
+import {
+  fetchTournamentDateFromHistoryApi,
+  type TournamentHistoryProbe,
+} from "./nakka-api-tournaments.js";
 
 export const LEAGUE_LIST_PAGE_SIZE = 30;
 export const LEAGUE_LIST_MAX_PAGES = 20;
@@ -46,13 +49,17 @@ export function isSeasonListPayload(
 export function shouldKeepCompletedLeagueEvent(
   item: NakkaApiLeagueSeasonItem,
   parsedDate: Date | null,
-  sixMonthsAgo: Date
+  now: Date,
+  sixMonthsAgo: Date,
+  is501: boolean
 ): boolean {
   return Boolean(
     item.tdid &&
       item.status === Number(NAKKA_STATUS_CODES.COMPLETED) &&
       parsedDate &&
-      parsedDate >= sixMonthsAgo
+      parsedDate < now &&
+      parsedDate >= sixMonthsAgo &&
+      is501
   );
 }
 
@@ -173,8 +180,9 @@ export async function fetchLeaguesByKeywordFromApi(
 
   console.log(`Collected: ${allLeagues.length} leagues`);
 
+  const now = new Date();
   const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  sixMonthsAgo.setMonth(now.getMonth() - 6);
 
   const leagues: NakkaLeagueScrapedDTO[] = [];
   let totalFilteredEvents = 0;
@@ -192,22 +200,35 @@ export async function fetchLeaguesByKeywordFromApi(
         continue;
       }
 
-      let parsedDate: Date | null = null;
+      let probe: TournamentHistoryProbe;
       try {
-        parsedDate = await fetchTournamentDateFromHistoryApi(season.tdid);
+        probe = await fetchTournamentDateFromHistoryApi(season.tdid);
       } catch (error) {
         console.error(`Failed to scrape date for event ${season.tdid}:`, error);
         continue;
       }
 
-      if (shouldKeepCompletedLeagueEvent(season, parsedDate, sixMonthsAgo) && parsedDate) {
-        events.push(toLeagueEventDto(season, league.lgid, parsedDate));
+      if (
+        shouldKeepCompletedLeagueEvent(
+          season,
+          probe.parsedDate,
+          now,
+          sixMonthsAgo,
+          probe.is501
+        ) &&
+        probe.parsedDate
+      ) {
+        events.push(toLeagueEventDto(season, league.lgid, probe.parsedDate));
         totalFilteredEvents++;
-      } else if (!parsedDate) {
+      } else if (probe.parsedDate && !probe.is501) {
+        console.log(
+          `[API] Skipping event ${season.tdid}: first match is not 501`
+        );
+      } else if (!probe.parsedDate) {
         console.log(`Skipping event ${season.tdid} - no valid date found`);
       } else {
         console.log(
-          `Skipping event ${season.tdid} - date ${parsedDate.toISOString()} outside 6-month range`
+          `Skipping event ${season.tdid} - date ${probe.parsedDate.toISOString()} outside 6-month range`
         );
       }
     }
