@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { scrapeTournamentStats } from "../lib/nakka-scraper.js";
+import { scrapeTournamentStats } from "../lib/nakka-api-stats.js";
 
 export const config = {
   api: {
