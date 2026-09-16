@@ -1,12 +1,12 @@
 import type { NakkaTournamentScrapedDTO } from "./types.js";
 import { httpsJsonRequest } from "./https-json.js";
-import { fetchMatchViewFromApi } from "./nakka-api-player-results.js";
+import { fetchMatchViewFromApiByMid } from "./nakka-api-player-results.js";
 import {
   NAKKA_BASE_URL,
-  NAKKA_HISTORY_API_URL,
   NAKKA_START_SCORE_501,
   NAKKA_STATUS_CODES,
-  NAKKA_TOURNAMENT_API_URL,
+  NAKKA_V1_MATCH_LIST_URL,
+  NAKKA_V1_TOURNAMENT_LIST_URL,
 } from "./constants.js";
 
 export const TOURNAMENT_LIST_PAGE_SIZE = 30;
@@ -22,11 +22,21 @@ export interface NakkaApiTournamentListItem {
   d?: number;
 }
 
-interface NakkaHistoryListResponse {
-  list?: Array<{
-    tmid?: string;
-    startTime?: number;
-  }>;
+export interface NakkaV1MatchListItem {
+  mid?: string;
+  tmid?: string;
+  startTime?: number;
+  match_type?: string;
+}
+
+export interface NakkaV1MatchListResponse {
+  result?: number;
+  list?: NakkaV1MatchListItem[];
+}
+
+export interface NakkaV1TournamentListResponse {
+  result?: number;
+  list?: NakkaApiTournamentListItem[];
 }
 
 export interface TournamentHistoryProbe {
@@ -43,17 +53,17 @@ export function is501FromFirstLegFirstPlayer(match: {
   return left === NAKKA_START_SCORE_501;
 }
 
-async function fetchFirstMatchIs501(tmid: string): Promise<boolean> {
+async function fetchFirstMatchIs501(mid: string): Promise<boolean> {
   try {
-    const apiData = await fetchMatchViewFromApi(tmid);
+    const apiData = await fetchMatchViewFromApiByMid(mid);
     const is501 = is501FromFirstLegFirstPlayer(apiData);
     const left = apiData?.legData?.[0]?.playerData?.[0]?.[0]?.left;
     console.log(
-      `[API] 501 probe for tmid=${tmid}: left=${left ?? "missing"} keep=${is501}`
+      `[API] 501 probe for mid=${mid}: left=${left ?? "missing"} keep=${is501}`
     );
     return is501;
   } catch (error) {
-    console.log(`[API] 501 probe failed for tmid=${tmid}:`, error);
+    console.log(`[API] 501 probe failed for mid=${mid}:`, error);
     return false;
   }
 }
@@ -92,8 +102,24 @@ export function parseTournamentDateFromHistoryStartTime(
 
 export function isTournamentListPayload(
   data: unknown
-): data is NakkaApiTournamentListItem[] {
-  return Array.isArray(data);
+): data is { result: 0; list: NakkaApiTournamentListItem[] } {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const payload = data as NakkaV1TournamentListResponse;
+  return payload.result === 0 && Array.isArray(payload.list);
+}
+
+export function isMatchListHistoryPayload(
+  data: unknown
+): data is { result: 0; list: NakkaV1MatchListItem[] } {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const payload = data as NakkaV1MatchListResponse;
+  return payload.result === 0 && Array.isArray(payload.list);
 }
 
 export function shouldKeepCompletedTournament(
@@ -128,19 +154,24 @@ export function toTournamentDto(
 
 async function fetchHistoryList(
   tournamentId: string
-): Promise<Array<{ tmid?: string; startTime?: number }> | null> {
-  const historyApiUrl = `${NAKKA_HISTORY_API_URL}?cmd=get_t_list&tdid=${encodeURIComponent(tournamentId)}&skip=0&count=1&name=`;
-  console.log(`Fetching match history from API directly`);
+): Promise<NakkaV1MatchListItem[] | null> {
+  const historyApiUrl = `${NAKKA_V1_MATCH_LIST_URL}?tdid=${encodeURIComponent(
+    tournamentId
+  )}&endMatch=1&skip=0&count=1`;
+  console.log(`[API] Requesting match history: ${historyApiUrl}`);
 
-  const data = await httpsJsonRequest<NakkaHistoryListResponse>(historyApiUrl);
-  if (!data?.list || !Array.isArray(data.list) || data.list.length === 0) {
+  const data = await httpsJsonRequest<unknown>(historyApiUrl);
+  const valid = isMatchListHistoryPayload(data);
+  if (!valid || data.list.length === 0) {
     console.log(
-      `No match data from history API (hasList: ${Boolean(data?.list)}, listLength: ${Array.isArray(data?.list) ? data.list.length : 0})`
+      `No match data from match list API (valid: ${valid}, listLength: ${
+        valid ? data.list.length : 0
+      })`
     );
     return null;
   }
 
-  console.log(`Received ${data.list.length} matches from history API`);
+  console.log(`Received ${data.list.length} matches from match list API`);
   return data.list;
 }
 
@@ -161,16 +192,16 @@ export async function fetchTournamentDateFromHistoryApi(
 
       if (parsedDate) {
         console.log(
-          `Scraped date ${parsedDate.toISOString()} from match history API for tournament ${tournamentId} (adjusted -4 hours, time stripped)`
+          `Scraped date ${parsedDate.toISOString()} from match list API for tournament ${tournamentId} (adjusted -4 hours, time stripped)`
         );
       }
 
       let is501 = false;
-      if (match.tmid) {
-        is501 = await fetchFirstMatchIs501(match.tmid);
+      if (match.mid) {
+        is501 = await fetchFirstMatchIs501(match.mid);
       } else {
         console.log(
-          `[API] Skipping 501 probe for tournament ${tournamentId}: missing tmid`
+          `[API] Skipping 501 probe for tournament ${tournamentId}: missing mid`
         );
       }
 
@@ -189,19 +220,12 @@ async function fetchTournamentListPage(
   keyword: string,
   skip: number
 ): Promise<NakkaApiTournamentListItem[]> {
-  const url = `${NAKKA_TOURNAMENT_API_URL}?cmd=get_list&skip=${skip}&count=${TOURNAMENT_LIST_PAGE_SIZE}&keyword=${encodeURIComponent(keyword)}`;
+  const url = `${NAKKA_V1_TOURNAMENT_LIST_URL}?skip=${skip}&count=${TOURNAMENT_LIST_PAGE_SIZE}&keyword=${encodeURIComponent(
+    keyword
+  )}&status=${NAKKA_STATUS_CODES.COMPLETED}`;
   console.log(`[API] Requesting tournament list: ${url}`);
 
-  const data = await httpsJsonRequest<unknown>(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      status: [NAKKA_STATUS_CODES.COMPLETED],
-      sort: "active",
-    }),
-  });
+  const data = await httpsJsonRequest<unknown>(url);
 
   if (!isTournamentListPayload(data)) {
     throw new Error(
@@ -209,7 +233,7 @@ async function fetchTournamentListPage(
     );
   }
 
-  return data;
+  return data.list;
 }
 
 export async function fetchTournamentsByKeywordFromApi(

@@ -4,6 +4,7 @@
 
 import {
   is501FromFirstLegFirstPlayer,
+  isMatchListHistoryPayload,
   isTournamentListPayload,
   parseTournamentDateFromHistoryStartTime,
   shouldKeepCompletedTournament,
@@ -44,18 +45,49 @@ const poznanSample: NakkaApiTournamentListItem[] = [
   },
 ];
 
-describe("isTournamentListPayload", () => {
-  test("should accept an array", () => {
-    expect(isTournamentListPayload(poznanSample)).toBe(true);
-    expect(isTournamentListPayload([])).toBe(true);
+describe("isMatchListHistoryPayload", () => {
+  test("should accept a documented match list success body", () => {
+    expect(
+      isMatchListHistoryPayload({
+        result: 0,
+        list: [
+          {
+            mid: "B50GiabD_1785353203041",
+            tmid: "t_oOwt_9261_t_2_0xP3_qZ7W",
+            startTime: 1785353203,
+            match_type: "cricket",
+          },
+        ],
+      })
+    ).toBe(true);
+    expect(isMatchListHistoryPayload({ result: 0, list: [] })).toBe(true);
   });
 
-  test("should reject the -50 error body", () => {
+  test("should reject error bodies and missing list", () => {
+    expect(isMatchListHistoryPayload({ result: -50 })).toBe(false);
+    expect(isMatchListHistoryPayload({ list: [] })).toBe(false);
+    expect(isMatchListHistoryPayload(null)).toBe(false);
+    expect(isMatchListHistoryPayload(-50)).toBe(false);
+  });
+});
+
+describe("isTournamentListPayload", () => {
+  test("should accept a documented tournament list success body", () => {
+    expect(
+      isTournamentListPayload({ result: 0, list: poznanSample })
+    ).toBe(true);
+    expect(isTournamentListPayload({ result: 0, list: [] })).toBe(true);
+  });
+
+  test("should reject error bodies and missing list", () => {
     expect(isTournamentListPayload(-50)).toBe(false);
     expect(isTournamentListPayload("-50")).toBe(false);
+    expect(isTournamentListPayload({ result: -50 })).toBe(false);
+    expect(isTournamentListPayload({ list: poznanSample })).toBe(false);
   });
 
-  test("should reject objects and null", () => {
+  test("should reject a top-level array, objects, and null", () => {
+    expect(isTournamentListPayload(poznanSample)).toBe(false);
     expect(isTournamentListPayload(null)).toBe(false);
     expect(isTournamentListPayload({ tdid: "t_ZA3r_2927" })).toBe(false);
   });
@@ -278,14 +310,14 @@ describe("is501FromFirstLegFirstPlayer", () => {
     ).toBe(false);
   });
 
-  test("should accept a history list item with tmid", () => {
-    const historyList: Array<{ tmid?: string; startTime?: number }> = [
+  test("should accept a history list item with mid", () => {
+    const historyList: Array<{ mid?: string; startTime?: number }> = [
       {
-        tmid: "t_Bhce_5464_rr_0_2F7T_XOGp",
-        startTime: 1772132718,
+        mid: "iFLeTEwI_1789162367448",
+        startTime: 1789162367,
       },
     ];
 
-    expect(historyList[0].tmid).toBe("t_Bhce_5464_rr_0_2F7T_XOGp");
+    expect(historyList[0].mid).toBe("iFLeTEwI_1789162367448");
   });
 });

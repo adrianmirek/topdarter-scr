@@ -1,7 +1,7 @@
 import type { NakkaMatchPlayerResultScrapedDTO } from "./types.js";
 import { extractMatchIdentifierComponents } from "./match-identifier.js";
 import { httpsJsonRequest } from "./https-json.js";
-import { NAKKA_MATCH_VIEW_API_URL } from "./constants.js";
+import { NAKKA_MATCH_VIEW_API_URL, NAKKA_V1_MATCH_GET_URL } from "./constants.js";
 import {
   calculateAverageScore,
   calculateFirstNineAverage,
@@ -14,8 +14,24 @@ import {
   type NakkaApiMatchResponse,
 } from "./nakka-api-calculations.js";
 
+export interface NakkaV1MatchGetResponse {
+  result?: number;
+  match?: NakkaApiMatchResponse;
+}
+
+export function isMatchGetPayload(
+  data: unknown
+): data is { result: 0; match: NakkaApiMatchResponse } {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const payload = data as NakkaV1MatchGetResponse;
+  return payload.result === 0 && Boolean(payload.match) && typeof payload.match === "object";
+}
+
 /**
- * Raw match_view POST used by player-results and the 501 tournament probe.
+ * Raw match_view POST used by player-results.
  */
 export async function fetchMatchViewFromApi(
   tmid: string
@@ -31,6 +47,25 @@ export async function fetchMatchViewFromApi(
       tmid,
     }),
   });
+}
+
+/**
+ * Documented match/get used by the 501 tournament probe.
+ */
+export async function fetchMatchViewFromApiByMid(
+  mid: string
+): Promise<NakkaApiMatchResponse> {
+  const url = `${NAKKA_V1_MATCH_GET_URL}?mid=${encodeURIComponent(mid)}`;
+  console.log(`[API] Requesting match get: ${url}`);
+
+  const data = await httpsJsonRequest<unknown>(url);
+  if (!isMatchGetPayload(data)) {
+    throw new Error(
+      `Match get API returned invalid payload: ${JSON.stringify(data)}`
+    );
+  }
+
+  return data.match;
 }
 
 /**
