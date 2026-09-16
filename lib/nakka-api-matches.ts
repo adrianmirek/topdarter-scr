@@ -1,6 +1,6 @@
 import type { NakkaMatchScrapedDTO } from "./types.js";
 import { httpsJsonRequest } from "./https-json.js";
-import { NAKKA_BASE_URL, NAKKA_HISTORY_API_URL } from "./constants.js";
+import { NAKKA_BASE_URL, NAKKA_V1_MATCH_LIST_URL } from "./constants.js";
 
 export const MATCH_LIST_PAGE_SIZE = 100;
 export const MATCH_LIST_MAX_PAGES = 20;
@@ -21,9 +21,21 @@ export interface NakkaApiMatchHistoryItem {
   match_type?: string;
 }
 
+export interface NakkaV1PublicMatchListItem {
+  mid?: string;
+  tmid?: string;
+  title?: string;
+  startTime?: number;
+  match_type?: string;
+  statsData?: Array<{
+    name?: string;
+    tpid?: string;
+  }>;
+}
+
 export interface NakkaHistoryListResponse {
-  time?: number;
-  list?: NakkaApiMatchHistoryItem[];
+  result?: number;
+  list?: NakkaV1PublicMatchListItem[];
 }
 
 export function extractTournamentIdFromHref(tournamentHref: string): string {
@@ -36,12 +48,30 @@ export function extractTournamentIdFromHref(tournamentHref: string): string {
 
 export function isHistoryListPayload(
   data: unknown
-): data is { list: NakkaApiMatchHistoryItem[] } {
-  return Boolean(
-    data &&
-      typeof data === "object" &&
-      Array.isArray((data as NakkaHistoryListResponse).list)
-  );
+): data is { result: 0; list: NakkaV1PublicMatchListItem[] } {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const payload = data as NakkaHistoryListResponse;
+  return payload.result === 0 && Array.isArray(payload.list);
+}
+
+export function toMatchHistoryItem(
+  item: NakkaV1PublicMatchListItem
+): NakkaMatchScrapedDTO {
+  const tmid = item.tmid || "";
+  return {
+    nakka_match_identifier: tmid,
+    nakka_mid: item.mid || "",
+    match_type: item.title || "unknown",
+    first_player_name: item.statsData?.[0]?.name || "Unknown",
+    first_player_code: item.statsData?.[0]?.tpid || "",
+    second_player_name: item.statsData?.[1]?.name || "Unknown",
+    second_player_code: item.statsData?.[1]?.tpid || "",
+    href: `${NAKKA_BASE_URL}/n01_view.html?tmid=${tmid}`,
+    match_date: parseMatchDateFromStartTime(item.startTime || 0),
+  };
 }
 
 export function parseMatchDateFromStartTime(startTime: number): Date | null {
@@ -52,13 +82,18 @@ export function parseMatchDateFromStartTime(startTime: number): Date | null {
   return isNaN(matchDate.getTime()) ? null : matchDate;
 }
 
-export function shouldKeepHistoryMatch(item: NakkaApiMatchHistoryItem): boolean {
-  return Boolean(item.tmid && item.p1tpid && item.p2tpid);
+export function shouldKeepHistoryMatch(item: NakkaMatchScrapedDTO): boolean {
+  return Boolean(
+    item.nakka_match_identifier &&
+      item.first_player_code &&
+      item.second_player_code
+  );
 }
 
 export function toMatchDto(item: NakkaApiMatchHistoryItem): NakkaMatchScrapedDTO {
   return {
     nakka_match_identifier: item.tmid,
+    nakka_mid: "",
     match_type: item.title || "unknown",
     first_player_name: item.p1name || "Unknown",
     first_player_code: item.p1tpid,
@@ -72,8 +107,10 @@ export function toMatchDto(item: NakkaApiMatchHistoryItem): NakkaMatchScrapedDTO
 async function fetchMatchListPage(
   tournamentId: string,
   skip: number
-): Promise<NakkaApiMatchHistoryItem[]> {
-  const url = `${NAKKA_HISTORY_API_URL}?cmd=get_t_list&tdid=${encodeURIComponent(tournamentId)}&skip=${skip}&count=${MATCH_LIST_PAGE_SIZE}&name=`;
+): Promise<NakkaMatchScrapedDTO[]> {
+  const url = `${NAKKA_V1_MATCH_LIST_URL}?tdid=${encodeURIComponent(
+    tournamentId
+  )}&skip=${skip}&count=${MATCH_LIST_PAGE_SIZE}`;
   console.log(`[API] Requesting match list: ${url}`);
 
   const data = await httpsJsonRequest<unknown>(url);
@@ -84,7 +121,7 @@ async function fetchMatchListPage(
     );
   }
 
-  return data.list;
+  return data.list.map(toMatchHistoryItem);
 }
 
 export async function fetchTournamentMatchesFromApi(
@@ -104,7 +141,7 @@ export async function fetchTournamentMatchesFromApi(
 
     for (const item of pageItems) {
       if (shouldKeepHistoryMatch(item)) {
-        matches.push(toMatchDto(item));
+        matches.push(item);
       }
     }
 

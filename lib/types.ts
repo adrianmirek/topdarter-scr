@@ -8,6 +8,7 @@ export interface NakkaTournamentScrapedDTO {
 
 export interface NakkaMatchScrapedDTO {
   nakka_match_identifier: string;
+  nakka_mid: string;
   match_type: string;
   first_player_name: string;
   first_player_code: string;
