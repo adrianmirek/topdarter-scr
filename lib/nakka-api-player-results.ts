@@ -1,7 +1,7 @@
 import type { NakkaMatchPlayerResultScrapedDTO } from "./types.js";
 import { extractMatchIdentifierComponents } from "./match-identifier.js";
 import { httpsJsonRequest } from "./https-json.js";
-import { NAKKA_MATCH_VIEW_API_URL, NAKKA_V1_MATCH_GET_URL } from "./constants.js";
+import { NAKKA_V1_MATCH_GET_URL } from "./constants.js";
 import {
   calculateAverageScore,
   calculateFirstNineAverage,
@@ -31,28 +31,10 @@ export function isMatchGetPayload(
 }
 
 /**
- * Raw match_view POST used by player-results.
+ * Public match/get used by player-results and the 501 tournament probe.
+ * Example: https://push.n01darts.com/api/v1/match/get?mid=iFLeTEwI_1789162367448
  */
 export async function fetchMatchViewFromApi(
-  tmid: string
-): Promise<NakkaApiMatchResponse> {
-  console.log(`[API] Requesting: ${NAKKA_MATCH_VIEW_API_URL}`);
-
-  return httpsJsonRequest<NakkaApiMatchResponse>(NAKKA_MATCH_VIEW_API_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    },
-    body: JSON.stringify({
-      tmid,
-    }),
-  });
-}
-
-/**
- * Documented match/get used by the 501 tournament probe.
- */
-export async function fetchMatchViewFromApiByMid(
   mid: string
 ): Promise<NakkaApiMatchResponse> {
   const url = `${NAKKA_V1_MATCH_GET_URL}?mid=${encodeURIComponent(mid)}`;
@@ -69,21 +51,30 @@ export async function fetchMatchViewFromApiByMid(
 }
 
 /**
+ * Documented match/get used by the 501 tournament probe.
+ */
+export async function fetchMatchViewFromApiByMid(
+  mid: string
+): Promise<NakkaApiMatchResponse> {
+  return fetchMatchViewFromApi(mid);
+}
+
+/**
  * Fetches player match results from the Nakka API (no browser).
  */
 export async function fetchMatchPlayerResultsFromApi(
-  nakkaMatchIdentifier: string,
+  nakkaMid: string,
   firstPlayerCode: string,
   secondPlayerCode: string
 ): Promise<NakkaMatchPlayerResultScrapedDTO[]> {
-  console.log(`[API] Fetching player results for match: ${nakkaMatchIdentifier}`);
+  console.log(`[API] Fetching player results for match: ${nakkaMid}`);
 
-  const components = extractMatchIdentifierComponents(nakkaMatchIdentifier);
+  const apiData = await fetchMatchViewFromApi(nakkaMid);
+
+  const components = extractMatchIdentifierComponents(apiData.tmid);
   if (!components) {
-    throw new Error(`Failed to parse match identifier: ${nakkaMatchIdentifier}`);
+    throw new Error(`Failed to parse match identifier: ${apiData.tmid}`);
   }
-
-  const apiData = await fetchMatchViewFromApi(nakkaMatchIdentifier);
 
   if (!apiData.legData || !Array.isArray(apiData.legData)) {
     throw new Error("Invalid API response: legData is missing or not an array");
