@@ -44,31 +44,38 @@ const sampleSeason: NakkaApiLeagueSeasonItem = {
 };
 
 describe("isLeagueListPayload", () => {
-  test("should accept an array", () => {
-    expect(isLeagueListPayload(wtorkoweSample)).toBe(true);
-    expect(isLeagueListPayload([])).toBe(true);
+  test("should accept result 0 with a list array", () => {
+    expect(isLeagueListPayload({ result: 0, list: wtorkoweSample })).toBe(true);
+    expect(isLeagueListPayload({ result: 0, list: [] })).toBe(true);
   });
 
   test("should reject the -50 error body", () => {
     expect(isLeagueListPayload(-50)).toBe(false);
     expect(isLeagueListPayload({ result: -50 })).toBe(false);
+    expect(isLeagueListPayload({ list: wtorkoweSample })).toBe(false);
   });
 
-  test("should reject objects and null", () => {
+  test("should reject a raw array, objects, and null", () => {
+    expect(isLeagueListPayload(wtorkoweSample)).toBe(false);
     expect(isLeagueListPayload(null)).toBe(false);
     expect(isLeagueListPayload({ lgid: "lg_mD0F_0939" })).toBe(false);
   });
 });
 
 describe("isSeasonListPayload", () => {
-  test("should accept an array", () => {
-    expect(isSeasonListPayload([sampleSeason])).toBe(true);
-    expect(isSeasonListPayload([])).toBe(true);
+  test("should accept result 0 with a list array", () => {
+    expect(isSeasonListPayload({ result: 0, list: [sampleSeason] })).toBe(true);
+    expect(isSeasonListPayload({ result: 0, list: [] })).toBe(true);
   });
 
   test("should reject the -50 error body", () => {
     expect(isSeasonListPayload(-50)).toBe(false);
     expect(isSeasonListPayload({ result: -50 })).toBe(false);
+    expect(isSeasonListPayload({ list: [sampleSeason] })).toBe(false);
+  });
+
+  test("should reject a raw array", () => {
+    expect(isSeasonListPayload([sampleSeason])).toBe(false);
   });
 });
 
