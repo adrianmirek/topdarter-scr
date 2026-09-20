@@ -2,7 +2,7 @@ export interface NakkaTournamentScrapedDTO {
   nakka_identifier: string;
   tournament_name: string;
   href: string;
-  tournament_date: Date;
+  tournament_date: Date | null;
   status: string;
 }
 
@@ -69,6 +69,6 @@ export interface NakkaLeagueEventScrapedDTO {
   event_href: string;
   league_id: string;
   event_status: string;
-  event_date: Date;
+  event_date: Date | null;
 }
 

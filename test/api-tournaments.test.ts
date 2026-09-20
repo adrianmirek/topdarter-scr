@@ -9,6 +9,7 @@ import {
   parseTournamentDateFromHistoryStartTime,
   shouldKeepCompletedTournament,
   toTournamentDto,
+  toTournamentListDto,
   type NakkaApiTournamentListItem,
 } from "../lib/nakka-api-tournaments";
 import { NAKKA_BASE_URL } from "../lib/constants";
@@ -121,6 +122,25 @@ describe("parseTournamentDateFromHistoryStartTime", () => {
     expect(result?.getUTCHours()).toBe(0);
     expect(result?.getUTCMinutes()).toBe(0);
     expect(result?.getUTCSeconds()).toBe(0);
+  });
+});
+
+describe("toTournamentListDto", () => {
+  test("should map tdid, title, href, and completed status without a date", () => {
+    const dto = toTournamentListDto(sampleCompleted);
+
+    expect(dto.nakka_identifier).toBe("t_ZA3r_2927");
+    expect(dto.tournament_name).toBe(
+      "23. turniej DART:START (śr. <45) w Poznań Darts Club"
+    );
+    expect(dto.href).toBe(`${NAKKA_BASE_URL}/comp.php?id=t_ZA3r_2927`);
+    expect(dto.tournament_date).toBeNull();
+    expect(dto.status).toBe("completed");
+  });
+
+  test("should fall back to Unknown Tournament when title is missing", () => {
+    const dto = toTournamentListDto({ ...sampleCompleted, title: "" });
+    expect(dto.tournament_name).toBe("Unknown Tournament");
   });
 });
 

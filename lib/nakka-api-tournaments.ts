@@ -10,7 +10,7 @@ import {
 } from "./constants.js";
 
 export const TOURNAMENT_LIST_PAGE_SIZE = 30;
-export const TOURNAMENT_LIST_MAX_PAGES = 20;
+export const TOURNAMENT_LIST_MAX_PAGES = 10;
 
 export interface NakkaApiTournamentListItem {
   tdid: string;
@@ -139,16 +139,25 @@ export function shouldKeepCompletedTournament(
   );
 }
 
-export function toTournamentDto(
-  item: NakkaApiTournamentListItem,
-  parsedDate: Date
+export function toTournamentListDto(
+  item: NakkaApiTournamentListItem
 ): NakkaTournamentScrapedDTO {
   return {
     nakka_identifier: item.tdid,
     tournament_name: item.title || "Unknown Tournament",
     href: `${NAKKA_BASE_URL}/comp.php?id=${item.tdid}`,
-    tournament_date: parsedDate,
+    tournament_date: null,
     status: "completed",
+  };
+}
+
+export function toTournamentDto(
+  item: NakkaApiTournamentListItem,
+  parsedDate: Date
+): NakkaTournamentScrapedDTO {
+  return {
+    ...toTournamentListDto(item),
+    tournament_date: parsedDate,
   };
 }
 
@@ -256,49 +265,70 @@ export async function fetchTournamentsByKeywordFromApi(
 
   console.log(`Collected: ${allItems.length} tournaments`);
 
+  const tournaments = allItems
+    .filter(
+      (item) =>
+        Boolean(item.tdid) &&
+        item.status === Number(NAKKA_STATUS_CODES.COMPLETED)
+    )
+    .map(toTournamentListDto);
+
+  console.log(`Filtered to ${tournaments.length} completed tournaments`);
+  return tournaments;
+}
+
+export async function fetchTournamentByTdidFromApi(
+  tdid: string
+): Promise<NakkaTournamentScrapedDTO | null> {
+  console.log(`[API] Fetching tournament details for tdid: "${tdid}"`);
+
   const now = new Date();
   const sixMonthsAgo = new Date();
   sixMonthsAgo.setMonth(now.getMonth() - 6);
 
-  const tournaments: NakkaTournamentScrapedDTO[] = [];
+  const item: NakkaApiTournamentListItem = {
+    tdid,
+    title: "",
+    status: Number(NAKKA_STATUS_CODES.COMPLETED),
+    t_date: 0,
+  };
 
-  for (const item of allItems) {
-    if (!item.tdid || item.status !== Number(NAKKA_STATUS_CODES.COMPLETED)) {
-      continue;
-    }
-
-    let probe: TournamentHistoryProbe;
-    try {
-      probe = await fetchTournamentDateFromHistoryApi(item.tdid);
-    } catch (error) {
-      console.error(`Failed to scrape date for tournament ${item.tdid}:`, error);
-      continue;
-    }
-
-    if (
-      shouldKeepCompletedTournament(
-        item,
-        probe.parsedDate,
-        now,
-        sixMonthsAgo,
-        probe.is501
-      ) &&
-      probe.parsedDate
-    ) {
-      tournaments.push(toTournamentDto(item, probe.parsedDate));
-    } else if (probe.parsedDate && !probe.is501) {
-      console.log(
-        `[API] Skipping tournament ${item.tdid}: first match is not 501`
-      );
-    }
+  let probe: TournamentHistoryProbe;
+  try {
+    probe = await fetchTournamentDateFromHistoryApi(tdid);
+  } catch (error) {
+    console.error(`Failed to scrape date for tournament ${tdid}:`, error);
+    return null;
   }
 
-  console.log(`Filtered to ${tournaments.length} completed tournaments`);
-  return tournaments;
+  if (
+    shouldKeepCompletedTournament(
+      item,
+      probe.parsedDate,
+      now,
+      sixMonthsAgo,
+      probe.is501
+    ) &&
+    probe.parsedDate
+  ) {
+    return toTournamentDto(item, probe.parsedDate);
+  }
+
+  if (probe.parsedDate && !probe.is501) {
+    console.log(`[API] Skipping tournament ${tdid}: first match is not 501`);
+  }
+
+  return null;
 }
 
 export async function scrapeTournamentsByKeyword(
   keyword: string
 ): Promise<NakkaTournamentScrapedDTO[]> {
   return fetchTournamentsByKeywordFromApi(keyword);
+}
+
+export async function scrapeTournamentByTdid(
+  tdid: string
+): Promise<NakkaTournamentScrapedDTO | null> {
+  return fetchTournamentByTdidFromApi(tdid);
 }

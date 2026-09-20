@@ -8,6 +8,7 @@ import {
   shouldKeepCompletedLeagueEvent,
   toLeagueDto,
   toLeagueEventDto,
+  toLeagueEventListDto,
   type NakkaApiLeagueListItem,
   type NakkaApiLeagueSeasonItem,
 } from "../lib/nakka-api-leagues";
@@ -96,6 +97,28 @@ describe("toLeagueDto", () => {
   test("should fall back to Unknown League when title is missing", () => {
     const dto = toLeagueDto({ ...sampleLeague, title: "" }, []);
     expect(dto.league_name).toBe("Unknown League");
+  });
+});
+
+describe("toLeagueEventListDto", () => {
+  test("should map tdid, title, href, and completed status without a date", () => {
+    const dto = toLeagueEventListDto(sampleSeason, "lg_mD0F_0939");
+
+    expect(dto.event_id).toBe("t_pr8N_8121");
+    expect(dto.event_name).toBe(
+      "ZAKRĘCONA - Wtorkowe Granie w Poznań Darts Club Wrzesień #2"
+    );
+    expect(dto.event_href).toBe(
+      `${NAKKA_LEAGUE_BASE_URL}/season.php?id=t_pr8N_8121`
+    );
+    expect(dto.league_id).toBe("lg_mD0F_0939");
+    expect(dto.event_status).toBe("completed");
+    expect(dto.event_date).toBeNull();
+  });
+
+  test("should fall back to Unknown Event when title is missing", () => {
+    const dto = toLeagueEventListDto({ ...sampleSeason, title: "" }, "lg_mD0F_0939");
+    expect(dto.event_name).toBe("Unknown Event");
   });
 });
 

@@ -9,10 +9,6 @@ import {
   NAKKA_V1_LEAGUE_LIST_URL,
   NAKKA_V1_TOURNAMENT_LIST_URL,
 } from "./constants.js";
-import {
-  fetchTournamentDateFromHistoryApi,
-  type TournamentHistoryProbe,
-} from "./nakka-api-tournaments.js";
 
 export const LEAGUE_LIST_PAGE_SIZE = 30;
 export const LEAGUE_LIST_MAX_PAGES = 20;
@@ -99,10 +95,9 @@ export function toLeagueDto(
   };
 }
 
-export function toLeagueEventDto(
+export function toLeagueEventListDto(
   item: NakkaApiLeagueSeasonItem,
-  leagueId: string,
-  parsedDate: Date
+  leagueId: string
 ): NakkaLeagueEventScrapedDTO {
   return {
     event_id: item.tdid,
@@ -110,6 +105,17 @@ export function toLeagueEventDto(
     event_href: `${NAKKA_LEAGUE_BASE_URL}/season.php?id=${item.tdid}`,
     league_id: leagueId,
     event_status: "completed",
+    event_date: null,
+  };
+}
+
+export function toLeagueEventDto(
+  item: NakkaApiLeagueSeasonItem,
+  leagueId: string,
+  parsedDate: Date
+): NakkaLeagueEventScrapedDTO {
+  return {
+    ...toLeagueEventListDto(item, leagueId),
     event_date: parsedDate,
   };
 }
@@ -191,12 +197,8 @@ export async function fetchLeaguesByKeywordFromApi(
 
   console.log(`Collected: ${allLeagues.length} leagues`);
 
-  const now = new Date();
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(now.getMonth() - 6);
-
   const leagues: NakkaLeagueScrapedDTO[] = [];
-  let totalFilteredEvents = 0;
+  let totalCompletedEvents = 0;
 
   for (const league of allLeagues) {
     if (!league.lgid) {
@@ -204,51 +206,20 @@ export async function fetchLeaguesByKeywordFromApi(
     }
 
     const seasons = await fetchLeagueSeasonsFromApi(league.lgid);
-    const events: NakkaLeagueEventScrapedDTO[] = [];
+    const events = seasons
+      .filter(
+        (season) =>
+          Boolean(season.tdid) &&
+          season.status === Number(NAKKA_STATUS_CODES.COMPLETED)
+      )
+      .map((season) => toLeagueEventListDto(season, league.lgid));
 
-    for (const season of seasons) {
-      if (!season.tdid || season.status !== Number(NAKKA_STATUS_CODES.COMPLETED)) {
-        continue;
-      }
-
-      let probe: TournamentHistoryProbe;
-      try {
-        probe = await fetchTournamentDateFromHistoryApi(season.tdid);
-      } catch (error) {
-        console.error(`Failed to scrape date for event ${season.tdid}:`, error);
-        continue;
-      }
-
-      if (
-        shouldKeepCompletedLeagueEvent(
-          season,
-          probe.parsedDate,
-          now,
-          sixMonthsAgo,
-          probe.is501
-        ) &&
-        probe.parsedDate
-      ) {
-        events.push(toLeagueEventDto(season, league.lgid, probe.parsedDate));
-        totalFilteredEvents++;
-      } else if (probe.parsedDate && !probe.is501) {
-        console.log(
-          `[API] Skipping event ${season.tdid}: first match is not 501`
-        );
-      } else if (!probe.parsedDate) {
-        console.log(`Skipping event ${season.tdid} - no valid date found`);
-      } else {
-        console.log(
-          `Skipping event ${season.tdid} - date ${probe.parsedDate.toISOString()} outside 6-month range`
-        );
-      }
-    }
-
+    totalCompletedEvents += events.length;
     leagues.push(toLeagueDto(league, events));
   }
 
   console.log(
-    `Final results: ${leagues.length} leagues, ${totalFilteredEvents} completed events`
+    `Final results: ${leagues.length} leagues, ${totalCompletedEvents} completed events`
   );
 
   return { leagues };
