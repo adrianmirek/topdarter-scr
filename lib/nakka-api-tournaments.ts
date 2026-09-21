@@ -11,6 +11,7 @@ import {
 
 export const TOURNAMENT_LIST_PAGE_SIZE = 30;
 export const TOURNAMENT_LIST_MAX_PAGES = 10;
+export const TOURNAMENT_LIST_RECENT_SYNC_MAX_PAGES = 1;
 
 export interface NakkaApiTournamentListItem {
   tdid: string;
@@ -139,6 +140,31 @@ export function shouldKeepCompletedTournament(
   );
 }
 
+export function parseKeywordLastSyncDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value !== "string" || value.trim() === "") {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+export function resolveTournamentListMaxPages(
+  keywordLastSyncDate: Date,
+  now: Date = new Date()
+): number {
+  const oneMonthAgo = new Date(now);
+  oneMonthAgo.setMonth(now.getMonth() - 1);
+
+  return keywordLastSyncDate < oneMonthAgo
+    ? TOURNAMENT_LIST_MAX_PAGES
+    : TOURNAMENT_LIST_RECENT_SYNC_MAX_PAGES;
+}
+
 export function toTournamentListDto(
   item: NakkaApiTournamentListItem
 ): NakkaTournamentScrapedDTO {
@@ -246,13 +272,17 @@ async function fetchTournamentListPage(
 }
 
 export async function fetchTournamentsByKeywordFromApi(
-  keyword: string
+  keyword: string,
+  keywordLastSyncDate: Date
 ): Promise<NakkaTournamentScrapedDTO[]> {
-  console.log(`[API] Fetching tournaments for keyword: "${keyword}"`);
+  const maxPages = resolveTournamentListMaxPages(keywordLastSyncDate);
+  console.log(
+    `[API] Fetching tournaments for keyword: "${keyword}" lastSync=${keywordLastSyncDate.toISOString()} maxPages=${maxPages}`
+  );
 
   const allItems: NakkaApiTournamentListItem[] = [];
 
-  for (let page = 0; page < TOURNAMENT_LIST_MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const skip = page * TOURNAMENT_LIST_PAGE_SIZE;
     const pageItems = await fetchTournamentListPage(keyword, skip);
     console.log(`[API] Tournament list page skip=${skip} count=${pageItems.length}`);
@@ -322,9 +352,10 @@ export async function fetchTournamentByTdidFromApi(
 }
 
 export async function scrapeTournamentsByKeyword(
-  keyword: string
+  keyword: string,
+  keywordLastSyncDate: Date
 ): Promise<NakkaTournamentScrapedDTO[]> {
-  return fetchTournamentsByKeywordFromApi(keyword);
+  return fetchTournamentsByKeywordFromApi(keyword, keywordLastSyncDate);
 }
 
 export async function scrapeTournamentByTdid(

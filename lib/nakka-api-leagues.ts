@@ -12,8 +12,10 @@ import {
 
 export const LEAGUE_LIST_PAGE_SIZE = 30;
 export const LEAGUE_LIST_MAX_PAGES = 20;
+export const LEAGUE_LIST_RECENT_SYNC_MAX_PAGES = 1;
 export const SEASON_LIST_PAGE_SIZE = 30;
 export const SEASON_LIST_MAX_PAGES = 20;
+export const SEASON_LIST_RECENT_SYNC_MAX_PAGES = 1;
 
 export interface NakkaApiLeagueListItem {
   lgid: string;
@@ -81,6 +83,30 @@ export function shouldKeepCompletedLeagueEvent(
       parsedDate >= sixMonthsAgo &&
       is501
   );
+}
+
+export function resolveLeagueListMaxPages(
+  keywordLastSyncDate: Date,
+  now: Date = new Date()
+): number {
+  const oneMonthAgo = new Date(now);
+  oneMonthAgo.setMonth(now.getMonth() - 1);
+
+  return keywordLastSyncDate < oneMonthAgo
+    ? LEAGUE_LIST_MAX_PAGES
+    : LEAGUE_LIST_RECENT_SYNC_MAX_PAGES;
+}
+
+export function resolveSeasonListMaxPages(
+  keywordLastSyncDate: Date,
+  now: Date = new Date()
+): number {
+  const oneMonthAgo = new Date(now);
+  oneMonthAgo.setMonth(now.getMonth() - 1);
+
+  return keywordLastSyncDate < oneMonthAgo
+    ? SEASON_LIST_MAX_PAGES
+    : SEASON_LIST_RECENT_SYNC_MAX_PAGES;
 }
 
 export function toLeagueDto(
@@ -157,11 +183,13 @@ async function fetchSeasonListPage(
 }
 
 export async function fetchLeagueSeasonsFromApi(
-  lgid: string
+  lgid: string,
+  keywordLastSyncDate: Date
 ): Promise<NakkaApiLeagueSeasonItem[]> {
+  const maxPages = resolveSeasonListMaxPages(keywordLastSyncDate);
   const allItems: NakkaApiLeagueSeasonItem[] = [];
 
-  for (let page = 0; page < SEASON_LIST_MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const skip = page * SEASON_LIST_PAGE_SIZE;
     const pageItems = await fetchSeasonListPage(lgid, skip);
     console.log(
@@ -178,13 +206,17 @@ export async function fetchLeagueSeasonsFromApi(
 }
 
 export async function fetchLeaguesByKeywordFromApi(
-  keyword: string
+  keyword: string,
+  keywordLastSyncDate: Date
 ): Promise<{ leagues: NakkaLeagueScrapedDTO[] }> {
-  console.log(`[API] Fetching leagues for keyword: "${keyword}"`);
+  const maxPages = resolveLeagueListMaxPages(keywordLastSyncDate);
+  console.log(
+    `[API] Fetching leagues for keyword: "${keyword}" lastSync=${keywordLastSyncDate.toISOString()} maxPages=${maxPages}`
+  );
 
   const allLeagues: NakkaApiLeagueListItem[] = [];
 
-  for (let page = 0; page < LEAGUE_LIST_MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     const skip = page * LEAGUE_LIST_PAGE_SIZE;
     const pageItems = await fetchLeagueListPage(keyword, skip);
     console.log(`[API] League list page skip=${skip} count=${pageItems.length}`);
@@ -205,7 +237,10 @@ export async function fetchLeaguesByKeywordFromApi(
       continue;
     }
 
-    const seasons = await fetchLeagueSeasonsFromApi(league.lgid);
+    const seasons = await fetchLeagueSeasonsFromApi(
+      league.lgid,
+      keywordLastSyncDate
+    );
     const events = seasons
       .filter(
         (season) =>
@@ -226,7 +261,8 @@ export async function fetchLeaguesByKeywordFromApi(
 }
 
 export async function scrapeLeaguesByKeyword(
-  keyword: string
+  keyword: string,
+  keywordLastSyncDate: Date
 ): Promise<{ leagues: NakkaLeagueScrapedDTO[] }> {
-  return fetchLeaguesByKeywordFromApi(keyword);
+  return fetchLeaguesByKeywordFromApi(keyword, keywordLastSyncDate);
 }

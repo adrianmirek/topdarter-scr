@@ -6,10 +6,14 @@ import {
   is501FromFirstLegFirstPlayer,
   isMatchListHistoryPayload,
   isTournamentListPayload,
+  parseKeywordLastSyncDate,
   parseTournamentDateFromHistoryStartTime,
+  resolveTournamentListMaxPages,
   shouldKeepCompletedTournament,
   toTournamentDto,
   toTournamentListDto,
+  TOURNAMENT_LIST_MAX_PAGES,
+  TOURNAMENT_LIST_RECENT_SYNC_MAX_PAGES,
   type NakkaApiTournamentListItem,
 } from "../lib/nakka-api-tournaments";
 import { NAKKA_BASE_URL } from "../lib/constants";
@@ -339,5 +343,54 @@ describe("is501FromFirstLegFirstPlayer", () => {
     ];
 
     expect(historyList[0].mid).toBe("iFLeTEwI_1789162367448");
+  });
+});
+
+describe("parseKeywordLastSyncDate", () => {
+  test("should parse an ISO date string", () => {
+    const parsed = parseKeywordLastSyncDate("2026-08-20T00:00:00.000Z");
+    expect(parsed).not.toBeNull();
+    expect(parsed?.toISOString()).toBe("2026-08-20T00:00:00.000Z");
+  });
+
+  test("should accept a Date instance", () => {
+    const input = new Date("2026-08-20T00:00:00.000Z");
+    expect(parseKeywordLastSyncDate(input)).toBe(input);
+  });
+
+  test("should reject missing, empty, and invalid values", () => {
+    expect(parseKeywordLastSyncDate(undefined)).toBeNull();
+    expect(parseKeywordLastSyncDate(null)).toBeNull();
+    expect(parseKeywordLastSyncDate("")).toBeNull();
+    expect(parseKeywordLastSyncDate("not-a-date")).toBeNull();
+    expect(parseKeywordLastSyncDate(new Date("invalid"))).toBeNull();
+  });
+});
+
+describe("resolveTournamentListMaxPages", () => {
+  const now = new Date("2026-09-20T12:00:00.000Z");
+
+  test("should use TOURNAMENT_LIST_MAX_PAGES when last sync is older than one month", () => {
+    expect(
+      resolveTournamentListMaxPages(new Date("2026-08-19T12:00:00.000Z"), now)
+    ).toBe(TOURNAMENT_LIST_MAX_PAGES);
+    expect(
+      resolveTournamentListMaxPages(new Date("2026-07-01T00:00:00.000Z"), now)
+    ).toBe(TOURNAMENT_LIST_MAX_PAGES);
+  });
+
+  test("should use 1 page when last sync is newer than one month", () => {
+    expect(
+      resolveTournamentListMaxPages(new Date("2026-08-21T12:00:00.000Z"), now)
+    ).toBe(TOURNAMENT_LIST_RECENT_SYNC_MAX_PAGES);
+    expect(
+      resolveTournamentListMaxPages(new Date("2026-09-10T00:00:00.000Z"), now)
+    ).toBe(TOURNAMENT_LIST_RECENT_SYNC_MAX_PAGES);
+  });
+
+  test("should treat a last sync exactly one month ago as recent", () => {
+    expect(
+      resolveTournamentListMaxPages(new Date("2026-08-20T12:00:00.000Z"), now)
+    ).toBe(TOURNAMENT_LIST_RECENT_SYNC_MAX_PAGES);
   });
 });

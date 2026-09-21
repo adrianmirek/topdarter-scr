@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { scrapeLeaguesByKeyword } from "../lib/nakka-api-leagues.js";
+import { parseKeywordLastSyncDate } from "../lib/nakka-api-tournaments.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Credentials": "true",
@@ -50,7 +51,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const { keyword } = req.body;
+    const { keyword, keyword_last_sync_date } = req.body;
 
     if (!keyword || typeof keyword !== "string") {
       return res
@@ -58,9 +59,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .json({ success: false, error: "Missing or invalid keyword parameter in body" });
     }
 
-    console.log(`[API] Scraping leagues and their events for keyword: "${keyword}"`);
+    const keywordLastSyncDate = parseKeywordLastSyncDate(keyword_last_sync_date);
+    if (!keywordLastSyncDate) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing or invalid keyword_last_sync_date parameter",
+      });
+    }
 
-    const result = await scrapeLeaguesByKeyword(keyword);
+    console.log(
+      `[API] Scraping leagues and their events for keyword: "${keyword}" lastSync=${keywordLastSyncDate.toISOString()}`
+    );
+
+    const result = await scrapeLeaguesByKeyword(keyword, keywordLastSyncDate);
     
     // Calculate stats from nested structure
     const totalEvents = result.leagues.reduce((sum, league) => sum + league.events.length, 0);

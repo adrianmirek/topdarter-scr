@@ -5,10 +5,16 @@
 import {
   isLeagueListPayload,
   isSeasonListPayload,
+  resolveLeagueListMaxPages,
+  resolveSeasonListMaxPages,
   shouldKeepCompletedLeagueEvent,
   toLeagueDto,
   toLeagueEventDto,
   toLeagueEventListDto,
+  LEAGUE_LIST_MAX_PAGES,
+  LEAGUE_LIST_RECENT_SYNC_MAX_PAGES,
+  SEASON_LIST_MAX_PAGES,
+  SEASON_LIST_RECENT_SYNC_MAX_PAGES,
   type NakkaApiLeagueListItem,
   type NakkaApiLeagueSeasonItem,
 } from "../lib/nakka-api-leagues";
@@ -238,5 +244,49 @@ describe("shouldKeepCompletedLeagueEvent", () => {
         true
       )
     ).toBe(false);
+  });
+});
+
+describe("resolveLeagueListMaxPages", () => {
+  const now = new Date("2026-09-20T12:00:00.000Z");
+
+  test("should use LEAGUE_LIST_MAX_PAGES when last sync is older than one month", () => {
+    expect(
+      resolveLeagueListMaxPages(new Date("2026-08-19T12:00:00.000Z"), now)
+    ).toBe(LEAGUE_LIST_MAX_PAGES);
+    expect(
+      resolveLeagueListMaxPages(new Date("2026-07-01T00:00:00.000Z"), now)
+    ).toBe(LEAGUE_LIST_MAX_PAGES);
+  });
+
+  test("should use 1 page when last sync is newer than one month", () => {
+    expect(
+      resolveLeagueListMaxPages(new Date("2026-08-21T12:00:00.000Z"), now)
+    ).toBe(LEAGUE_LIST_RECENT_SYNC_MAX_PAGES);
+    expect(
+      resolveLeagueListMaxPages(new Date("2026-09-10T00:00:00.000Z"), now)
+    ).toBe(LEAGUE_LIST_RECENT_SYNC_MAX_PAGES);
+  });
+
+  test("should treat a last sync exactly one month ago as recent", () => {
+    expect(
+      resolveLeagueListMaxPages(new Date("2026-08-20T12:00:00.000Z"), now)
+    ).toBe(LEAGUE_LIST_RECENT_SYNC_MAX_PAGES);
+  });
+});
+
+describe("resolveSeasonListMaxPages", () => {
+  const now = new Date("2026-09-20T12:00:00.000Z");
+
+  test("should use SEASON_LIST_MAX_PAGES when last sync is older than one month", () => {
+    expect(
+      resolveSeasonListMaxPages(new Date("2026-08-19T12:00:00.000Z"), now)
+    ).toBe(SEASON_LIST_MAX_PAGES);
+  });
+
+  test("should use 1 page when last sync is newer than one month", () => {
+    expect(
+      resolveSeasonListMaxPages(new Date("2026-09-10T00:00:00.000Z"), now)
+    ).toBe(SEASON_LIST_RECENT_SYNC_MAX_PAGES);
   });
 });
