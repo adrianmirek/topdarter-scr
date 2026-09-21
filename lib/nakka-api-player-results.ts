@@ -1,6 +1,7 @@
 import type { NakkaMatchPlayerResultScrapedDTO } from "./types.js";
 import { extractMatchIdentifierComponents } from "./match-identifier.js";
 import { httpsJsonRequest } from "./https-json.js";
+import { NAKKA_V1_MATCH_GET_URL } from "./constants.js";
 import {
   calculateAverageScore,
   calculateFirstNineAverage,
@@ -13,35 +14,67 @@ import {
   type NakkaApiMatchResponse,
 } from "./nakka-api-calculations.js";
 
+export interface NakkaV1MatchGetResponse {
+  result?: number;
+  match?: NakkaApiMatchResponse;
+}
+
+export function isMatchGetPayload(
+  data: unknown
+): data is { result: 0; match: NakkaApiMatchResponse } {
+  if (!data || typeof data !== "object") {
+    return false;
+  }
+
+  const payload = data as NakkaV1MatchGetResponse;
+  return payload.result === 0 && Boolean(payload.match) && typeof payload.match === "object";
+}
+
+/**
+ * Public match/get used by player-results and the 501 tournament probe.
+ * Example: https://push.n01darts.com/api/v1/match/get?mid=iFLeTEwI_1789162367448
+ */
+export async function fetchMatchViewFromApi(
+  mid: string
+): Promise<NakkaApiMatchResponse> {
+  const url = `${NAKKA_V1_MATCH_GET_URL}?mid=${encodeURIComponent(mid)}`;
+  console.log(`[API] Requesting match get: ${url}`);
+
+  const data = await httpsJsonRequest<unknown>(url);
+  if (!isMatchGetPayload(data)) {
+    throw new Error(
+      `Match get API returned invalid payload: ${JSON.stringify(data)}`
+    );
+  }
+
+  return data.match;
+}
+
+/**
+ * Documented match/get used by the 501 tournament probe.
+ */
+export async function fetchMatchViewFromApiByMid(
+  mid: string
+): Promise<NakkaApiMatchResponse> {
+  return fetchMatchViewFromApi(mid);
+}
+
 /**
  * Fetches player match results from the Nakka API (no browser).
  */
 export async function fetchMatchPlayerResultsFromApi(
-  nakkaMatchIdentifier: string,
+  nakkaMid: string,
   firstPlayerCode: string,
   secondPlayerCode: string
 ): Promise<NakkaMatchPlayerResultScrapedDTO[]> {
-  console.log(`[API] Fetching player results for match: ${nakkaMatchIdentifier}`);
+  console.log(`[API] Fetching player results for match: ${nakkaMid}`);
 
-  const components = extractMatchIdentifierComponents(nakkaMatchIdentifier);
+  const apiData = await fetchMatchViewFromApi(nakkaMid);
+
+  const components = extractMatchIdentifierComponents(apiData.tmid);
   if (!components) {
-    throw new Error(`Failed to parse match identifier: ${nakkaMatchIdentifier}`);
+    throw new Error(`Failed to parse match identifier: ${apiData.tmid}`);
   }
-
-  const apiUrl =
-    "https://tk2-228-23746.vs.sakura.ne.jp/n01/tournament/n01_user_t.php?cmd=match_view&sid=";
-
-  console.log(`[API] Requesting: ${apiUrl}`);
-
-  const apiData = await httpsJsonRequest<NakkaApiMatchResponse>(apiUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-    },
-    body: JSON.stringify({
-      tmid: nakkaMatchIdentifier,
-    }),
-  });
 
   if (!apiData.legData || !Array.isArray(apiData.legData)) {
     throw new Error("Invalid API response: legData is missing or not an array");

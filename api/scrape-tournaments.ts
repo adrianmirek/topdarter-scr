@@ -1,5 +1,8 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { scrapeTournamentsByKeyword } from "../lib/nakka-api-tournaments.js";
+import {
+  parseKeywordLastSyncDate,
+  scrapeTournamentsByKeyword,
+} from "../lib/nakka-api-tournaments.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Credentials": "true",
@@ -33,7 +36,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { keyword } = req.body;
+    const { keyword, keyword_last_sync_date } = req.body;
 
     if (!keyword || typeof keyword !== "string") {
       return res
@@ -41,9 +44,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .json({ success: false, error: "Missing or invalid keyword parameter" });
     }
 
-    console.log(`[API] Scraping tournaments for keyword: "${keyword}"`);
+    const keywordLastSyncDate = parseKeywordLastSyncDate(keyword_last_sync_date);
+    if (!keywordLastSyncDate) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing or invalid keyword_last_sync_date parameter",
+      });
+    }
 
-    const tournaments = await scrapeTournamentsByKeyword(keyword);
+    console.log(
+      `[API] Scraping tournaments for keyword: "${keyword}" lastSync=${keywordLastSyncDate.toISOString()}`
+    );
+
+    const tournaments = await scrapeTournamentsByKeyword(
+      keyword,
+      keywordLastSyncDate
+    );
 
     console.log(`[API] Successfully scraped ${tournaments.length} tournaments`);
 

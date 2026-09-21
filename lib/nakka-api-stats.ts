@@ -1,6 +1,6 @@
 import type { NakkaPlayerStatsDTO, NakkaTournamentStatsDTO } from "./types.js";
 import { httpsJsonRequest } from "./https-json.js";
-import { NAKKA_STATS_API_URL } from "./constants.js";
+import { NAKKA_V1_TOURNAMENT_STATS_URL } from "./constants.js";
 
 export interface NakkaApiPlayerStats {
   score: number;
@@ -22,18 +22,26 @@ export interface NakkaApiPlayerStats {
   [key: string]: unknown;
 }
 
+export interface NakkaV1TournamentStatsResponse {
+  result?: number;
+  kind?: string;
+  stats?: Record<string, NakkaApiPlayerStats>;
+}
+
 export function isTournamentStatsPayload(
   data: unknown
-): data is Record<string, NakkaApiPlayerStats> {
+): data is { result: 0; stats: Record<string, NakkaApiPlayerStats> } {
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return false;
   }
 
-  if (typeof (data as { result?: unknown }).result === "number") {
-    return false;
-  }
-
-  return true;
+  const payload = data as NakkaV1TournamentStatsResponse;
+  return (
+    payload.result === 0 &&
+    Boolean(payload.stats) &&
+    typeof payload.stats === "object" &&
+    !Array.isArray(payload.stats)
+  );
 }
 
 export function roundStat(value: number): number {
@@ -78,7 +86,7 @@ export function toTournamentStatsDto(
 export async function fetchTournamentStatsFromApi(
   tournamentId: string
 ): Promise<NakkaTournamentStatsDTO> {
-  const url = `${NAKKA_STATS_API_URL}?cmd=stats_list&tdid=${encodeURIComponent(tournamentId)}`;
+  const url = `${NAKKA_V1_TOURNAMENT_STATS_URL}?tdid=${encodeURIComponent(tournamentId)}`;
   console.log(`[API] Requesting tournament stats: ${url}`);
 
   const data = await httpsJsonRequest<unknown>(url);
@@ -89,7 +97,7 @@ export async function fetchTournamentStatsFromApi(
     );
   }
 
-  const result = toTournamentStatsDto(tournamentId, data);
+  const result = toTournamentStatsDto(tournamentId, data.stats);
   console.log(
     `[API] Processed ${result.players_stats.length} player(s) for tournament ${tournamentId}`
   );

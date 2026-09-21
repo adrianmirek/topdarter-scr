@@ -48,17 +48,21 @@ const sampleZeroRank: NakkaApiPlayerStats = {
 };
 
 describe("isTournamentStatsPayload", () => {
-  test("should accept a player-id keyed object", () => {
-    expect(isTournamentStatsPayload({ KfXM: samplePlayer })).toBe(true);
-    expect(isTournamentStatsPayload({})).toBe(true);
+  test("should accept result 0 with a stats object", () => {
+    expect(
+      isTournamentStatsPayload({ result: 0, kind: "stats_list", stats: { KfXM: samplePlayer } })
+    ).toBe(true);
+    expect(isTournamentStatsPayload({ result: 0, stats: {} })).toBe(true);
   });
 
   test("should reject the -50 error body", () => {
     expect(isTournamentStatsPayload(-50)).toBe(false);
     expect(isTournamentStatsPayload({ result: -50 })).toBe(false);
+    expect(isTournamentStatsPayload({ stats: { KfXM: samplePlayer } })).toBe(false);
   });
 
-  test("should reject arrays and null", () => {
+  test("should reject a raw player map, arrays, and null", () => {
+    expect(isTournamentStatsPayload({ KfXM: samplePlayer })).toBe(false);
     expect(isTournamentStatsPayload([samplePlayer])).toBe(false);
     expect(isTournamentStatsPayload(null)).toBe(false);
   });
