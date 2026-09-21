@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { fetchMatchPlayerResultsFromApi } from "../lib/nakka-api-player-results.js";
+import { scrapeTournamentByTdid } from "../lib/nakka-api-tournaments.js";
 
 const corsHeaders = {
   "Access-Control-Allow-Credentials": "true",
@@ -21,35 +21,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   const apiKey = process.env.TOPDARTER_API_KEY;
+  console.log("[DEBUG] API Key set:", apiKey ? "Yes (length: " + apiKey.length + ")" : "No");
+  console.log("[DEBUG] topdarter-api-key header:", req.headers["topdarter-api-key"] || "Not provided");
+
   if (apiKey && req.headers["topdarter-api-key"] !== apiKey) {
+    console.log("[AUTH] Unauthorized access attempt");
     return res.status(401).json({ success: false, error: "Unauthorized" });
   }
 
   try {
-    const { nakkaMid, firstPlayerCode, secondPlayerCode } = req.body;
+    const { nakka_identifier } = req.body;
 
-    if (!nakkaMid || !firstPlayerCode || !secondPlayerCode) {
-      return res.status(400).json({
-        success: false,
-        error:
-          "Missing required parameters: nakkaMid, firstPlayerCode, secondPlayerCode",
+    if (!nakka_identifier || typeof nakka_identifier !== "string") {
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing or invalid nakka_identifier parameter" });
+    }
+
+    console.log(`[API] Scraping tournament for nakka_identifier: "${nakka_identifier}"`);
+
+    const tournament = await scrapeTournamentByTdid(nakka_identifier);
+
+    if (!tournament) {
+      console.log(`[API] Tournament ${nakka_identifier} was skipped or not found`);
+      return res.status(200).json({
+        success: true,
+        data: null,
       });
     }
 
-    console.log(`[API] Scraping player results for match: ${nakkaMid}`);
-
-    const playerResults = await fetchMatchPlayerResultsFromApi(
-      nakkaMid,
-      firstPlayerCode,
-      secondPlayerCode
-    );
-
-    console.log(`[API] Successfully scraped ${playerResults.length} player results`);
+    console.log(`[API] Successfully scraped tournament ${nakka_identifier}`);
 
     return res.status(200).json({
       success: true,
-      data: playerResults,
-      count: playerResults.length,
+      data: tournament,
     });
   } catch (error) {
     console.error("[API] Scraping error:", error);
